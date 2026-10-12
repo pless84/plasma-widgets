@@ -69,6 +69,8 @@ Muted and resolved badges are off by default; switch them on under **Show badges
 
 The same idea for [Sentry](https://sentry.io/), on sentry.io or your own server: badges for new (first seen in the last 24 hours), open, archived and resolved issues across your organization. Click for the unresolved issues grouped by project. Click an issue to open it in Sentry, or resolve or archive it from the popup:
 
+<img src="screenshots/sentrystatus-panel.png" width="103" alt="Sentry Status in the panel: badges for 2 new and 3 open issues">
+
 <img src="screenshots/sentrystatus-popup.png" width="468" alt="Sentry Status popup: unresolved issues grouped by project with error title, short ID, events, users and last seen, and resolve and archive buttons">
 
 Archived and resolved badges are off by default; switch them on under **Show badges**. The counts come from Sentry's search and cover issues seen in the last 90 days. The popup lists the 100 most recently seen unresolved issues; you can raise that under **General**.
@@ -86,6 +88,8 @@ While something is deploying, the widget checks every few seconds so you see the
 ### Runner Status
 
 Self-hosted GitHub Actions runners, read from a runner dashboard's `/api/status` (set its address under **General**; it defaults to `http://192.168.1.217:8089`). The panel shows badges for offline, busy and idle runners. Click for every runner with its running job, last finished job and recent warnings, plus the host's load, uptime and free disk. Click a runner to open its job, or its repository's Actions page, on GitHub:
+
+<img src="screenshots/runnerstatus-panel.png" width="148" alt="Runner Status in the panel: badges for 1 offline, 2 busy and 2 idle runners">
 
 <img src="screenshots/runnerstatus-popup.png" width="468" alt="Runner Status popup: runners with their state, the running job, the last finished job and recent warnings, and the host's load, uptime and free disk">
 
