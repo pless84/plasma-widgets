@@ -27,6 +27,37 @@ PlasmoidItem {
     property date lastChecked
     property string errorText: ""
     property bool loading: false
+    // The dashboard's "llm" block ({gpu, memory, ollama, mlx}), or null when it has none.
+    property var llm: null
+    // What Logic.llmChanges() returned last time; null until the first check.
+    property var llmSnapshot: null
+
+    readonly property var llmServers: Logic.llmServers(llm)
+    readonly property string llmState: Logic.llmState(llm)
+    // The panel's LLM badge: the GPU load, coloured and marked by the servers' state.
+    readonly property var llmBadge: {
+        if (!llmState || !Plasmoid.configuration.showLlmInPanel) return null
+        const glyph = llmState === "down" ? "cross" : llmState === "busy" ? "play" : "check"
+        return {
+            key: "llm", glyph: glyph, roundGlyph: glyph,
+            color: llmState === "down" ? Plasmoid.configuration.colorOffline
+                : llmState === "busy" ? Plasmoid.configuration.colorBusy : Plasmoid.configuration.colorIdle,
+        }
+    }
+    readonly property string llmGpuText: {
+        if (!llm || !llm.gpu) return ""
+        const g = llm.gpu, m = llm.memory || {}
+        const num = v => v === null || v === undefined ? "–" : v
+        return i18n("GPU %1% · %2 GB allocated · RAM %3% used · swap %4 / %5 GB", num(g.util), num(g.alloc_gb),
+                    m.free_pct === null || m.free_pct === undefined ? "–" : 100 - m.free_pct,
+                    num(m.swap_used_gb), num(m.swap_total_gb))
+    }
+    readonly property string llmSummary: {
+        if (!llmState) return ""
+        const down = llmServers.filter(s => !s.up).length
+        if (down > 0) return i18np("%1 LLM server down", "%1 LLM servers down", down)
+        return i18n("LLMs: GPU %1%", llm.gpu && llm.gpu.util !== null && llm.gpu.util !== undefined ? llm.gpu.util : "–")
+    }
 
     // Runner states in panel order, worst first. Colours come from the Appearance settings and
     // default to the dashboard's own; "glyph" is the square style's symbol, "roundGlyph" the rounded one's.
@@ -113,7 +144,16 @@ PlasmoidItem {
         host = data.host
         runners = data.runners
         snapshot = result.snapshot
+        llm = data.llm || null
+        const llmResult = Logic.llmChanges(llm, llmSnapshot)
+        llmSnapshot = llmResult.snapshot
         loaded = true
+
+        if (llmResult.wentDown.length > 0 && Plasmoid.configuration.notifyOnLlmDown) {
+            notification.title = i18np("LLM server down", "%1 LLM servers down", llmResult.wentDown.length)
+            notification.text = llmResult.wentDown.map(s => s.name).join("\n")
+            notification.sendEvent()
+        }
 
         if (result.wentOffline.length > 0 && Plasmoid.configuration.notifyOnOffline) {
             notification.title = i18np("Runner offline", "%1 runners offline", result.wentOffline.length)
@@ -135,6 +175,8 @@ PlasmoidItem {
         runners = []
         host = null
         snapshot = null
+        llm = null
+        llmSnapshot = null
         errorText = ""
         loading = false
         refresh()
@@ -146,7 +188,7 @@ PlasmoidItem {
         : PlasmaCore.Types.ActiveStatus
 
     toolTipMainText: i18n("Runner Status")
-    toolTipSubText: errorText || summary
+    toolTipSubText: errorText || (llmSummary ? summary + "\n" + llmSummary : summary)
 
     switchWidth: Kirigami.Units.gridUnit * 12
     switchHeight: Kirigami.Units.gridUnit * 12
@@ -223,7 +265,7 @@ PlasmoidItem {
     // Square or rounded (pill-shaped), as chosen under Appearance.
     component StatusBadge: Rectangle {
         property var badgeState
-        property int count
+        property var count
         property real size
         readonly property bool rounded: Plasmoid.configuration.badgeStyle === "rounded"
 
@@ -271,7 +313,9 @@ PlasmoidItem {
         property var badgeStates: root.visibleStates
         property bool showTotal: false
         property bool showLogo: false
-        readonly property int itemCount: badgeStates.length + (showTotal ? 1 : 0) + (showLogo ? 1 : 0)
+        // The LLM badge (root.llmBadge) after the runner badges, or null for none.
+        property var extraBadge: null
+        readonly property int itemCount: badgeStates.length + (showTotal ? 1 : 0) + (showLogo ? 1 : 0) + (extraBadge ? 1 : 0)
 
         flow: vertical ? GridLayout.TopToBottom : GridLayout.LeftToRight
         rows: vertical ? Math.max(itemCount, 1) : 1
@@ -303,6 +347,14 @@ PlasmoidItem {
             text: i18n("(of %1)", root.runners.length)
             font.pixelSize: bar.badgeSize * 0.6
         }
+
+        StatusBadge {
+            visible: !!bar.extraBadge
+            badgeState: bar.extraBadge || root.runnerStates[2]
+            count: root.llm && root.llm.gpu && root.llm.gpu.util !== null && root.llm.gpu.util !== undefined
+                ? root.llm.gpu.util + "%" : "–"
+            size: bar.badgeSize
+        }
     }
 
     compactRepresentation: MouseArea {
@@ -310,9 +362,9 @@ PlasmoidItem {
 
         readonly property bool vertical: Plasmoid.formFactor === PlasmaCore.Types.Vertical
         readonly property real badgeSize: Math.min(Kirigami.Units.iconSizes.smallMedium, vertical ? width : height)
-        readonly property bool showTotal: Plasmoid.configuration.showTotalInPanel
-        readonly property bool showBadges: root.badgeMode && root.runners.length > 0
-            && (root.panelStates.length > 0 || showTotal)
+        readonly property bool showTotal: Plasmoid.configuration.showTotalInPanel && root.runners.length > 0
+        readonly property bool showBadges: root.badgeMode
+            && ((root.runners.length > 0 && (root.panelStates.length > 0 || showTotal)) || !!root.llmBadge)
 
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton
@@ -331,8 +383,9 @@ PlasmoidItem {
             id: badges
             anchors.centerIn: parent
             visible: compact.showBadges
-            badgeStates: root.panelStates
+            badgeStates: root.runners.length > 0 ? root.panelStates : []
             showTotal: compact.showTotal
+            extraBadge: root.llmBadge
             showLogo: Plasmoid.configuration.showLogo
             vertical: compact.vertical
             badgeSize: compact.badgeSize
@@ -421,10 +474,11 @@ PlasmoidItem {
             BadgeBar {
                 Layout.margins: Kirigami.Units.smallSpacing
                 Layout.bottomMargin: 0
-                visible: root.badgeMode && root.runners.length > 0
+                visible: root.badgeMode && (root.runners.length > 0 || !!root.llmBadge)
                 badgeSize: Kirigami.Units.iconSizes.small * 1.25
-                badgeStates: root.panelStates
-                showTotal: Plasmoid.configuration.showTotalInPanel
+                badgeStates: root.runners.length > 0 ? root.panelStates : []
+                showTotal: Plasmoid.configuration.showTotalInPanel && root.runners.length > 0
+                extraBadge: root.llmBadge
             }
 
             // The machine the runners live on.
@@ -470,6 +524,121 @@ PlasmoidItem {
             ColumnLayout {
                 width: scroll.availableWidth
                 spacing: Kirigami.Units.smallSpacing
+
+                // ---- Local LLMs, when the dashboard reports them ----
+                PlasmaExtras.Heading {
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    Layout.leftMargin: Kirigami.Units.smallSpacing
+                    visible: root.llm !== null
+                    level: 5
+                    opacity: 0.7
+                    text: i18n("Local LLMs")
+                }
+
+                PlasmaComponents.Label {
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    Layout.leftMargin: Kirigami.Units.smallSpacing
+                    Layout.rightMargin: Kirigami.Units.smallSpacing
+                    visible: root.llmGpuText !== ""
+                    wrapMode: Text.WordWrap
+                    font: Kirigami.Theme.smallFont
+                    // Nearly full swap is the usual reason generation slows down.
+                    color: (Logic.swapPercent(root.llm ? root.llm.memory : null) || 0) >= 80
+                        ? root.stateColor("busy") : Kirigami.Theme.textColor
+                    text: root.llmGpuText
+                }
+
+                Repeater {
+                    model: root.llmServers
+
+                    PlasmaComponents.ItemDelegate {
+                        id: llmItem
+                        required property var modelData
+                        readonly property color stateColor: root.stateColor(modelData.up ? "idle" : "offline")
+
+                        Layout.fillWidth: true
+                        onClicked: Qt.openUrlExternally(root.serverUrl)
+
+                        contentItem: ColumnLayout {
+                            spacing: 0
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Kirigami.Units.smallSpacing
+
+                                Rectangle {
+                                    Layout.preferredWidth: Kirigami.Units.smallSpacing * 2
+                                    Layout.preferredHeight: width
+                                    radius: width / 2
+                                    color: llmItem.stateColor
+                                }
+                                PlasmaComponents.Label {
+                                    textFormat: Text.PlainText
+                                    Layout.fillWidth: true
+                                    text: llmItem.modelData.kind === "mlx" ? i18n("MLX · %1", llmItem.modelData.name) : llmItem.modelData.name
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                }
+                                PlasmaComponents.Label {
+                                    textFormat: Text.PlainText
+                                    text: llmItem.modelData.up ? i18n("Up") : i18n("Down")
+                                    color: llmItem.stateColor
+                                }
+                            }
+
+                            // Ollama: the loaded models. MLX: memory and prompt cache.
+                            PlasmaComponents.Label {
+                                textFormat: Text.PlainText
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                text: {
+                                    const s = llmItem.modelData
+                                    if (!s.up) return s.error || i18n("Not responding")
+                                    if (s.kind === "ollama") {
+                                        return s.models.length === 0 ? i18n("No model loaded")
+                                            : s.models.map(m => m.expires
+                                                ? i18n("%1 · %2 GB · unloads in %3", m.name, m.size_gb,
+                                                       Logic.formatDuration(Date.parse(m.expires) / 1000 - root.serverNow))
+                                                : i18n("%1 · %2 GB", m.name, m.size_gb)).join(", ")
+                                    }
+                                    return [
+                                        s.footprintGb !== null && s.footprintGb !== undefined ? i18n("%1 GB in memory", s.footprintGb) : "",
+                                        s.promptCache ? i18n("prompt cache %1 GB", s.promptCache.gb) : "",
+                                    ].filter(t => t).join(" · ")
+                                }
+                            }
+
+                            PlasmaComponents.Label {
+                                textFormat: Text.PlainText
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                font: Kirigami.Theme.smallFont
+                                opacity: 0.7
+                                text: {
+                                    const s = llmItem.modelData
+                                    return [
+                                        s.kind === "ollama" ? (s.version ? "v" + s.version : "") : s.label,
+                                        s.kind === "mlx" && s.up && s.uptime ? i18n("up %1", Logic.formatDuration(s.uptime)) : "",
+                                        s.lastRequest ? i18n("last request %1", root.ago(s.lastRequest)) : i18n("no requests yet"),
+                                    ].filter(t => t).join(" · ")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                PlasmaExtras.Heading {
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    Layout.leftMargin: Kirigami.Units.smallSpacing
+                    Layout.topMargin: Kirigami.Units.smallSpacing
+                    visible: root.llm !== null && runnerRepeater.count > 0
+                    level: 5
+                    opacity: 0.7
+                    text: i18n("Runners")
+                }
 
                 Repeater {
                     id: runnerRepeater

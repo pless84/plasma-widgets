@@ -42,6 +42,14 @@
       <label>Show the total number of runners after the badges</label>
       <default>false</default>
     </entry>
+    <entry name="showLlmInPanel" type="Bool">
+      <label>Show a local-LLM badge (GPU load, coloured by server state) after the runner badges</label>
+      <default>true</default>
+    </entry>
+    <entry name="notifyOnLlmDown" type="Bool">
+      <label>Send a notification when a local LLM server goes down</label>
+      <default>true</default>
+    </entry>
   </group>
   <group name="Appearance">
     <entry name="showLogo" type="Bool">

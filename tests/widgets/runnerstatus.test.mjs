@@ -98,3 +98,52 @@ test("changes: runners going offline and newly failed jobs", () => {
     assert.deepEqual(result.wentOffline.map(r => r.dir), ["a"])
     assert.deepEqual(result.failedJobs.map(f => f.runner.dir + ":" + f.job.name), ["a:new", "b:build"])
 })
+
+function llm(extra = {}) {
+    return {
+        gpu: { util: 0, alloc_gb: 42.9 },
+        memory: { free_pct: 54, swap_used_gb: 6, swap_total_gb: 24 },
+        ollama: { up: true, version: "0.40.3", models: [{ name: "gemma" }], requests: [{ time: 10 }, { time: 30 }] },
+        mlx: [{ label: "dk.pless.mlx-rpr", model: "Org/Qwen3-8Bit", up: true, footprint_gb: 39, requests: [] }],
+        ...extra,
+    }
+}
+
+test("shortModel and lastRequestTime", () => {
+    assert.equal(L.shortModel("Org/Qwen3-8Bit"), "Qwen3-8Bit")
+    assert.equal(L.shortModel("plain"), "plain")
+    assert.equal(L.shortModel(null), "")
+    assert.equal(L.lastRequestTime([{ time: 10 }, { time: 30 }, { time: 20 }]), 30)
+    assert.equal(L.lastRequestTime(undefined), 0)
+})
+
+test("llmServers lists Ollama then the MLX servers", () => {
+    assert.deepEqual(L.llmServers(undefined), [])
+    const servers = L.llmServers(llm())
+    assert.deepEqual(servers.map(s => [s.key, s.name, s.up]), [["ollama", "Ollama", true], ["dk.pless.mlx-rpr", "Qwen3-8Bit", true]])
+    assert.equal(servers[0].lastRequest, 30)
+    assert.equal(servers[1].footprintGb, 39)
+    assert.equal(L.llmServers(llm({ ollama: { error: "boom" } }))[0].up, false)
+})
+
+test("llmState: down beats busy beats idle", () => {
+    assert.equal(L.llmState(undefined), "")
+    assert.equal(L.llmState(llm()), "idle")
+    assert.equal(L.llmState(llm({ gpu: { util: 85 } })), "busy")
+    assert.equal(L.llmState(llm({ gpu: { util: 85 }, ollama: { up: false } })), "down")
+    assert.equal(L.llmState(llm({ mlx: [{ label: "x", up: false }] })), "down")
+})
+
+test("swapPercent", () => {
+    assert.equal(L.swapPercent({ swap_used_gb: 6, swap_total_gb: 24 }), 25)
+    assert.equal(L.swapPercent({ swap_used_gb: 0, swap_total_gb: 0 }), null)
+    assert.equal(L.swapPercent(undefined), null)
+})
+
+test("llmChanges: servers going down, never on the first check", () => {
+    const first = L.llmChanges(llm({ ollama: { up: false } }), null)
+    assert.deepEqual(first.wentDown, [])
+    assert.deepEqual(first.snapshot, { ollama: false, "dk.pless.mlx-rpr": true })
+    const second = L.llmChanges(llm({ ollama: { up: false }, mlx: [{ label: "dk.pless.mlx-rpr", up: false }] }), first.snapshot)
+    assert.deepEqual(second.wentDown.map(s => s.key), ["dk.pless.mlx-rpr"])
+})

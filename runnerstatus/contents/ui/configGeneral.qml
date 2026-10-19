@@ -14,6 +14,8 @@ KCM.SimpleKCM {
     property alias cfg_showIdleInPanel: showIdleInPanel.checked
     property alias cfg_showZeroInPanel: showZeroInPanel.checked
     property alias cfg_showTotalInPanel: showTotalInPanel.checked
+    property alias cfg_showLlmInPanel: showLlmInPanel.checked
+    property alias cfg_notifyOnLlmDown: notifyOnLlmDown.checked
 
     Kirigami.FormLayout {
         QQC2.TextField {
@@ -61,6 +63,10 @@ KCM.SimpleKCM {
             id: showTotalInPanel
             text: i18n("Show the total, e.g. \"(of 2)\"")
         }
+        QQC2.CheckBox {
+            id: showLlmInPanel
+            text: i18n("Local LLMs (GPU load; red if a server is down)")
+        }
 
         QQC2.CheckBox {
             id: notifyOnOffline
@@ -70,6 +76,10 @@ KCM.SimpleKCM {
         QQC2.CheckBox {
             id: notifyOnFailedJob
             text: i18n("Notify when a job fails")
+        }
+        QQC2.CheckBox {
+            id: notifyOnLlmDown
+            text: i18n("Notify when a local LLM server goes down")
         }
     }
 }
