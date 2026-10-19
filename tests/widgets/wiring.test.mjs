@@ -25,7 +25,7 @@ for (const widget of widgets) {
 }
 
 // Popups with grouped lists let you collapse each group (GroupHeader), saved in collapsedGroups.
-for (const widget of widgets.filter(w => w !== "runnerstatus")) {
+for (const widget of widgets) {
     test(`${widget}: popup groups are collapsible`, () => {
         const qml = source(widget, "ui/main.qml")
         assert.match(qml, /component GroupHeader: Kirigami\.ListSectionHeader/)

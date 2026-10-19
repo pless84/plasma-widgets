@@ -50,6 +50,10 @@
       <label>Send a notification when a local LLM server goes down</label>
       <default>true</default>
     </entry>
+    <entry name="collapsedGroups" type="StringList">
+      <label>Groups collapsed in the popup</label>
+      <default></default>
+    </entry>
   </group>
   <group name="Appearance">
     <entry name="showLogo" type="Bool">

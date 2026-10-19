@@ -165,3 +165,8 @@ function llmChanges(llm, previous) {
     })
     return { snapshot: snapshot, wentDown: wentDown }
 }
+
+// The collapsed groups list with key added, or removed if it was there
+function toggled(list, key) {
+    return list.includes(key) ? list.filter(k => k !== key) : list.concat([key])
+}

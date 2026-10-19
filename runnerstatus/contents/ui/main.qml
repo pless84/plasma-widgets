@@ -418,6 +418,30 @@ PlasmoidItem {
         }
     }
 
+    function isCollapsed(key) {
+        return Plasmoid.configuration.collapsedGroups.includes(key)
+    }
+
+    function toggleCollapsed(key) {
+        Plasmoid.configuration.collapsedGroups = Logic.toggled(Array.from(Plasmoid.configuration.collapsedGroups), key)
+    }
+
+    // A popup section header that collapses or expands its list when clicked, remembered per
+    // groupKey. The list's Repeater shows nothing while "collapsed" is set.
+    component GroupHeader: Kirigami.ListSectionHeader {
+        id: groupHeader
+        property string groupKey
+        readonly property bool collapsed: root.isCollapsed(groupKey)
+
+        Layout.fillWidth: true
+        icon.name: collapsed ? (Qt.application.layoutDirection === Qt.RightToLeft ? "arrow-left" : "arrow-right") : "arrow-down"
+        icon.width: Kirigami.Units.iconSizes.small
+        icon.height: Kirigami.Units.iconSizes.small
+        hoverEnabled: true
+        onClicked: root.toggleCollapsed(groupKey)
+        Accessible.name: collapsed ? i18n("Expand %1", text) : i18n("Collapse %1", text)
+    }
+
     fullRepresentation: PlasmaExtras.Representation {
         Layout.minimumWidth: Kirigami.Units.gridUnit * 18
         Layout.minimumHeight: Kirigami.Units.gridUnit * 14
@@ -526,13 +550,10 @@ PlasmoidItem {
                 spacing: Kirigami.Units.smallSpacing
 
                 // ---- Local LLMs, when the dashboard reports them ----
-                PlasmaExtras.Heading {
-                    textFormat: Text.PlainText
-                    Layout.fillWidth: true
-                    Layout.leftMargin: Kirigami.Units.smallSpacing
+                GroupHeader {
+                    id: llmHeader
                     visible: root.llm !== null
-                    level: 5
-                    opacity: 0.7
+                    groupKey: "llm"
                     text: i18n("Local LLMs")
                 }
 
@@ -541,7 +562,7 @@ PlasmoidItem {
                     Layout.fillWidth: true
                     Layout.leftMargin: Kirigami.Units.smallSpacing
                     Layout.rightMargin: Kirigami.Units.smallSpacing
-                    visible: root.llmGpuText !== ""
+                    visible: root.llmGpuText !== "" && !llmHeader.collapsed
                     wrapMode: Text.WordWrap
                     font: Kirigami.Theme.smallFont
                     // Nearly full swap is the usual reason generation slows down.
@@ -551,7 +572,7 @@ PlasmoidItem {
                 }
 
                 Repeater {
-                    model: root.llmServers
+                    model: llmHeader.collapsed ? [] : root.llmServers
 
                     PlasmaComponents.ItemDelegate {
                         id: llmItem
@@ -629,20 +650,17 @@ PlasmoidItem {
                     }
                 }
 
-                PlasmaExtras.Heading {
-                    textFormat: Text.PlainText
-                    Layout.fillWidth: true
-                    Layout.leftMargin: Kirigami.Units.smallSpacing
-                    Layout.topMargin: Kirigami.Units.smallSpacing
-                    visible: root.llm !== null && runnerRepeater.count > 0
-                    level: 5
-                    opacity: 0.7
+                // Only needed to tell the runners apart from the LLMs above them.
+                GroupHeader {
+                    id: runnersHeader
+                    visible: root.llm !== null && root.runners.length > 0
+                    groupKey: "runners"
                     text: i18n("Runners")
                 }
 
                 Repeater {
                     id: runnerRepeater
-                    model: root.sortedRunners
+                    model: runnersHeader.visible && runnersHeader.collapsed ? [] : root.sortedRunners
 
                     PlasmaComponents.ItemDelegate {
                         id: runnerItem
@@ -730,7 +748,7 @@ PlasmoidItem {
                 PlasmaExtras.PlaceholderMessage {
                     Layout.fillWidth: true
                     Layout.topMargin: Kirigami.Units.gridUnit * 2
-                    visible: runnerRepeater.count === 0
+                    visible: root.runners.length === 0
                     iconName: root.errorText ? "network-disconnect" : root.loading ? "view-refresh" : "run-build"
                     text: root.errorText ? root.errorText : root.summary
                 }
