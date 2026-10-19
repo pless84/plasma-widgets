@@ -166,6 +166,59 @@ function llmChanges(llm, previous) {
     return { snapshot: snapshot, wentDown: wentDown }
 }
 
+// ---- Scheduled jobs (the dashboard's "jobs" block; absent on older dashboards) ----
+
+// The dashboard reports each LaunchAgent job as ok, running, waiting (not run yet), failed,
+// missed, "not loaded" or error. As badge colours: ok is idle (green), running is busy
+// (yellow), waiting is neutral, and anything else (including statuses it may add later) is
+// a problem (red).
+function jobState(job) {
+    switch (job.status) {
+    case "ok": return "idle"
+    case "running": return "busy"
+    case "waiting": return "waiting"
+    default: return "offline"
+    }
+}
+
+function jobFailing(job) {
+    return jobState(job) === "offline"
+}
+
+function failingJobs(jobs) {
+    return (jobs || []).filter(jobFailing)
+}
+
+// Failing jobs first, then by name.
+function sortJobs(jobs) {
+    return (jobs || []).slice().sort((a, b) =>
+        (jobFailing(b) ? 1 : 0) - (jobFailing(a) ? 1 : 0) || String(a.name || "").localeCompare(String(b.name || "")))
+}
+
+// The newest line of a job's log ({time, text}), or null.
+function lastLogLine(job) {
+    const log = job.log || []
+    return log.length > 0 ? log[0] : null
+}
+
+// Jobs that started failing since the previous check, or failed again on a new run, for
+// notifications. `previous` is the snapshot this returned last time, or null on the first check
+// (which never notifies). Jobs are told apart by their launchd label.
+function jobChanges(jobs, previous) {
+    const snapshot = {}
+    const newlyFailing = []
+    ;(jobs || []).forEach(j => {
+        const key = j.label || j.name
+        const failing = jobFailing(j)
+        snapshot[key] = { failing: failing, lastRun: j.last_run || 0 }
+        const before = previous && previous[key]
+        if (failing && before && (!before.failing || (j.last_run || 0) > before.lastRun)) {
+            newlyFailing.push(j)
+        }
+    })
+    return { snapshot: snapshot, newlyFailing: newlyFailing }
+}
+
 // The collapsed groups list with key added, or removed if it was there
 function toggled(list, key) {
     return list.includes(key) ? list.filter(k => k !== key) : list.concat([key])

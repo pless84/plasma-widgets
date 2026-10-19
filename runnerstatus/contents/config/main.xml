@@ -50,6 +50,14 @@
       <label>Send a notification when a local LLM server goes down</label>
       <default>true</default>
     </entry>
+    <entry name="showJobsInPanel" type="Bool">
+      <label>Show a red badge while a scheduled job (e.g. a backup) has failed or missed its run</label>
+      <default>true</default>
+    </entry>
+    <entry name="notifyOnJobProblem" type="Bool">
+      <label>Send a notification when a scheduled job fails or misses its run</label>
+      <default>true</default>
+    </entry>
     <entry name="collapsedGroups" type="StringList">
       <label>Groups collapsed in the popup</label>
       <default></default>

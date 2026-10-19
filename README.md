@@ -13,7 +13,7 @@ KDE Plasma 6 widgets for keeping an eye on GitHub, PRTG, Docker, Bugsink, Sentry
 | [Bugsink Status](bugsinkstatus) | `dk.madebypless.bugsinkstatus` | Status badges for your Bugsink issues (new, open, muted, resolved), with the open issues per project and resolve / mute buttons |
 | [Sentry Status](sentrystatus) | `dk.madebypless.sentrystatus` | Status badges for your Sentry issues (new, open, archived, resolved), with the unresolved issues per project and resolve / archive buttons |
 | [Dokploy Status](dokploystatus) | `dk.madebypless.dokploystatus` | Status badges for your Dokploy applications, Compose stacks and databases (failed, deploying, deployed, idle), with deploy / start / stop buttons |
-| [Runner Status](runnerstatus) | `dk.madebypless.runnerstatus` | Status badges for self-hosted GitHub Actions runners (offline, busy, idle) and local LLM servers from a [Mac server dashboard](https://github.com/pless84/mac-server-dashboard)'s `/api/status`, with the running job and last result per runner |
+| [Runner Status](runnerstatus) | `dk.madebypless.runnerstatus` | Status badges for self-hosted GitHub Actions runners (offline, busy, idle) local LLM servers and scheduled jobs (e.g. backups) from a [Mac server dashboard](https://github.com/pless84/mac-server-dashboard)'s `/api/status`, with the running job and last result per runner |
 
 Every badge widget offers square or rounded badges, adjustable colours, a choice of which states get a badge, and an optional logo in front of the badges in the panel (any icon, or an image file such as a downloaded logo). Find these under **Appearance** and **General** in the widget's settings.
 
@@ -96,6 +96,8 @@ Self-hosted GitHub Actions runners, read from a [Mac server dashboard](https://g
 The widget checks every 15 seconds by default and notifies you when a runner goes offline or a job fails. A runner the dashboard reports as anything other than idle or busy counts as offline.
 
 If the dashboard also reports local LLMs (as [mac-server-dashboard](https://github.com/pless84/mac-server-dashboard) does), the panel gets one more badge showing the GPU load. It's green when idle, yellow while the GPU is busy (10% or more) and red when Ollama or an MLX server is down. The popup gains a **Local LLMs** section with GPU, RAM and swap use, Ollama's loaded models, and each MLX server's memory and last request. You can turn the badge and the "server down" notification off under **General**.
+
+If the dashboard reports scheduled jobs (LaunchAgents that run on a schedule, such as a nightly backup), the popup gains a **Scheduled jobs** section: each job's schedule, when it last ran, when it runs next and the newest line of its log. While a job has failed (its last exit code isn't 0) or missed a scheduled run, the panel shows a red badge with the number of such jobs, and you get a notification when a job starts failing or fails again on a later run. Both can be turned off under **General**.
 
 ## Install
 

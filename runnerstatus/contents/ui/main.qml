@@ -32,6 +32,21 @@ PlasmoidItem {
     // What Logic.llmChanges() returned last time; null until the first check.
     property var llmSnapshot: null
 
+    // The dashboard's "jobs" list (scheduled LaunchAgents, e.g. a nightly backup); empty on older dashboards.
+    property var jobs: []
+    // What Logic.jobChanges() returned last time; null until the first check.
+    property var jobSnapshot: null
+    readonly property var sortedJobs: Logic.sortJobs(jobs)
+    readonly property int failingJobCount: Logic.failingJobs(jobs).length
+    // The panel's jobs badge: only while a scheduled job has failed or missed its run.
+    readonly property var jobsBadge: failingJobCount > 0 && Plasmoid.configuration.showJobsInPanel
+        ? { key: "jobs", glyph: "cross", roundGlyph: "cross", color: Plasmoid.configuration.colorOffline, count: failingJobCount }
+        : null
+    readonly property string jobsSummary: failingJobCount > 0
+        ? i18np("%1 scheduled job failing", "%1 scheduled jobs failing", failingJobCount) : ""
+    // The badges after the runner badges: local LLMs, then failing jobs.
+    readonly property var extraBadges: [llmBadge, jobsBadge].filter(b => b)
+
     readonly property var llmServers: Logic.llmServers(llm)
     readonly property string llmState: Logic.llmState(llm)
     // The panel's LLM badge: the GPU load, coloured and marked by the servers' state.
@@ -40,6 +55,7 @@ PlasmoidItem {
         const glyph = llmState === "down" ? "cross" : llmState === "busy" ? "play" : "check"
         return {
             key: "llm", glyph: glyph, roundGlyph: glyph,
+            count: llm.gpu && llm.gpu.util !== null && llm.gpu.util !== undefined ? llm.gpu.util + "%" : "–",
             color: llmState === "down" ? Plasmoid.configuration.colorOffline
                 : llmState === "busy" ? Plasmoid.configuration.colorBusy : Plasmoid.configuration.colorIdle,
         }
@@ -107,6 +123,18 @@ PlasmoidItem {
         return st ? st.label : key
     }
 
+    function jobStatusLabel(status) {
+        switch (status) {
+        case "ok": return i18n("OK")
+        case "running": return i18n("Running")
+        case "waiting": return i18n("Not run yet")
+        case "failed": return i18n("Failed")
+        case "missed": return i18n("Missed")
+        case "not loaded": return i18n("Not loaded")
+        default: return status || i18n("Unknown")
+        }
+    }
+
     function ago(time) {
         return time ? i18n("%1 ago", Logic.formatDuration(serverNow - time)) : "–"
     }
@@ -147,7 +175,22 @@ PlasmoidItem {
         llm = data.llm || null
         const llmResult = Logic.llmChanges(llm, llmSnapshot)
         llmSnapshot = llmResult.snapshot
+        jobs = data.jobs || []
+        const jobResult = Logic.jobChanges(jobs, jobSnapshot)
+        jobSnapshot = jobResult.snapshot
         loaded = true
+
+        if (jobResult.newlyFailing.length > 0 && Plasmoid.configuration.notifyOnJobProblem) {
+            const j = jobResult.newlyFailing[0]
+            jobNotification.title = jobResult.newlyFailing.length === 1
+                ? i18n("Scheduled job %1: %2", j.name, jobStatusLabel(j.status))
+                : i18np("%1 scheduled job failing", "%1 scheduled jobs failing", jobResult.newlyFailing.length)
+            jobNotification.text = jobResult.newlyFailing.map(j => {
+                const line = Logic.lastLogLine(j)
+                return j.name + (line ? " · " + line.text : "")
+            }).join("\n")
+            jobNotification.sendEvent()
+        }
 
         if (llmResult.wentDown.length > 0 && Plasmoid.configuration.notifyOnLlmDown) {
             notification.title = i18np("LLM server down", "%1 LLM servers down", llmResult.wentDown.length)
@@ -177,18 +220,20 @@ PlasmoidItem {
         snapshot = null
         llm = null
         llmSnapshot = null
+        jobs = []
+        jobSnapshot = null
         errorText = ""
         loading = false
         refresh()
     }
 
     Plasmoid.icon: "run-build"
-    Plasmoid.status: (stateCounts.offline || 0) > 0
+    Plasmoid.status: (stateCounts.offline || 0) > 0 || (failingJobCount > 0 && Plasmoid.configuration.showJobsInPanel)
         ? PlasmaCore.Types.NeedsAttentionStatus
         : PlasmaCore.Types.ActiveStatus
 
     toolTipMainText: i18n("Runner Status")
-    toolTipSubText: errorText || (llmSummary ? summary + "\n" + llmSummary : summary)
+    toolTipSubText: errorText || [summary, llmSummary, jobsSummary].filter(t => t).join("\n")
 
     switchWidth: Kirigami.Units.gridUnit * 12
     switchHeight: Kirigami.Units.gridUnit * 12
@@ -209,6 +254,14 @@ PlasmoidItem {
 
     Notification {
         id: notification
+        componentName: "plasma_workspace"
+        eventId: "notification"
+        iconName: "run-build"
+    }
+
+    // Its own notification, so a failing job doesn't replace a runner or LLM one sent in the same check.
+    Notification {
+        id: jobNotification
         componentName: "plasma_workspace"
         eventId: "notification"
         iconName: "run-build"
@@ -313,9 +366,9 @@ PlasmoidItem {
         property var badgeStates: root.visibleStates
         property bool showTotal: false
         property bool showLogo: false
-        // The LLM badge (root.llmBadge) after the runner badges, or null for none.
-        property var extraBadge: null
-        readonly property int itemCount: badgeStates.length + (showTotal ? 1 : 0) + (showLogo ? 1 : 0) + (extraBadge ? 1 : 0)
+        // Badges after the runner badges ({glyph, roundGlyph, color, count}): root.extraBadges.
+        property var extraBadges: []
+        readonly property int itemCount: badgeStates.length + (showTotal ? 1 : 0) + (showLogo ? 1 : 0) + extraBadges.length
 
         flow: vertical ? GridLayout.TopToBottom : GridLayout.LeftToRight
         rows: vertical ? Math.max(itemCount, 1) : 1
@@ -348,12 +401,14 @@ PlasmoidItem {
             font.pixelSize: bar.badgeSize * 0.6
         }
 
-        StatusBadge {
-            visible: !!bar.extraBadge
-            badgeState: bar.extraBadge || root.runnerStates[2]
-            count: root.llm && root.llm.gpu && root.llm.gpu.util !== null && root.llm.gpu.util !== undefined
-                ? root.llm.gpu.util + "%" : "–"
-            size: bar.badgeSize
+        Repeater {
+            model: bar.extraBadges
+            StatusBadge {
+                required property var modelData
+                badgeState: modelData
+                count: modelData.count
+                size: bar.badgeSize
+            }
         }
     }
 
@@ -364,7 +419,7 @@ PlasmoidItem {
         readonly property real badgeSize: Math.min(Kirigami.Units.iconSizes.smallMedium, vertical ? width : height)
         readonly property bool showTotal: Plasmoid.configuration.showTotalInPanel && root.runners.length > 0
         readonly property bool showBadges: root.badgeMode
-            && ((root.runners.length > 0 && (root.panelStates.length > 0 || showTotal)) || !!root.llmBadge)
+            && ((root.runners.length > 0 && (root.panelStates.length > 0 || showTotal)) || root.extraBadges.length > 0)
 
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton
@@ -385,7 +440,7 @@ PlasmoidItem {
             visible: compact.showBadges
             badgeStates: root.runners.length > 0 ? root.panelStates : []
             showTotal: compact.showTotal
-            extraBadge: root.llmBadge
+            extraBadges: root.extraBadges
             showLogo: Plasmoid.configuration.showLogo
             vertical: compact.vertical
             badgeSize: compact.badgeSize
@@ -498,11 +553,11 @@ PlasmoidItem {
             BadgeBar {
                 Layout.margins: Kirigami.Units.smallSpacing
                 Layout.bottomMargin: 0
-                visible: root.badgeMode && (root.runners.length > 0 || !!root.llmBadge)
+                visible: root.badgeMode && (root.runners.length > 0 || root.extraBadges.length > 0)
                 badgeSize: Kirigami.Units.iconSizes.small * 1.25
                 badgeStates: root.runners.length > 0 ? root.panelStates : []
                 showTotal: Plasmoid.configuration.showTotalInPanel && root.runners.length > 0
-                extraBadge: root.llmBadge
+                extraBadges: root.extraBadges
             }
 
             // The machine the runners live on.
@@ -650,10 +705,92 @@ PlasmoidItem {
                     }
                 }
 
-                // Only needed to tell the runners apart from the LLMs above them.
+                // ---- Scheduled jobs (e.g. a nightly backup), when the dashboard reports any ----
+                GroupHeader {
+                    id: jobsHeader
+                    visible: root.jobs.length > 0
+                    groupKey: "jobs"
+                    text: i18n("Scheduled jobs")
+                }
+
+                Repeater {
+                    model: jobsHeader.collapsed ? [] : root.sortedJobs
+
+                    PlasmaComponents.ItemDelegate {
+                        id: jobItem
+                        required property var modelData
+                        readonly property string jobState: Logic.jobState(modelData)
+                        readonly property bool failing: Logic.jobFailing(modelData)
+                        readonly property var lastLine: Logic.lastLogLine(modelData)
+
+                        Layout.fillWidth: true
+                        onClicked: Qt.openUrlExternally(root.serverUrl)
+
+                        contentItem: ColumnLayout {
+                            spacing: 0
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: Kirigami.Units.smallSpacing
+
+                                Rectangle {
+                                    Layout.preferredWidth: Kirigami.Units.smallSpacing * 2
+                                    Layout.preferredHeight: width
+                                    radius: width / 2
+                                    color: root.stateColor(jobItem.jobState)
+                                }
+                                PlasmaComponents.Label {
+                                    textFormat: Text.PlainText
+                                    Layout.fillWidth: true
+                                    text: jobItem.modelData.name || ""
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                }
+                                PlasmaComponents.Label {
+                                    textFormat: Text.PlainText
+                                    text: jobItem.modelData.exit_code
+                                        ? i18n("%1 (exit %2)", root.jobStatusLabel(jobItem.modelData.status), jobItem.modelData.exit_code)
+                                        : root.jobStatusLabel(jobItem.modelData.status)
+                                    color: root.stateColor(jobItem.jobState)
+                                }
+                            }
+
+                            // Schedule, last and next run.
+                            PlasmaComponents.Label {
+                                textFormat: Text.PlainText
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                text: {
+                                    const j = jobItem.modelData
+                                    return [
+                                        j.schedule || "",
+                                        j.last_run ? i18n("last run %1", root.ago(j.last_run)) : i18n("not run yet"),
+                                        j.next_run && j.next_run > root.serverNow
+                                            ? i18n("next in %1", Logic.formatDuration(j.next_run - root.serverNow)) : "",
+                                    ].filter(t => t).join(" · ")
+                                }
+                            }
+
+                            // The newest log line, e.g. "saved storyforge-….tar.gz (8.0K)".
+                            PlasmaComponents.Label {
+                                textFormat: Text.PlainText
+                                Layout.fillWidth: true
+                                visible: !!jobItem.lastLine || !!jobItem.modelData.error
+                                elide: Text.ElideRight
+                                font: Kirigami.Theme.smallFont
+                                color: jobItem.failing ? root.stateColor("offline") : Kirigami.Theme.textColor
+                                opacity: jobItem.failing ? 1 : 0.7
+                                text: jobItem.modelData.error
+                                    || (jobItem.lastLine ? jobItem.lastLine.text : "")
+                            }
+                        }
+                    }
+                }
+
+                // Only needed to tell the runners apart from the sections above them.
                 GroupHeader {
                     id: runnersHeader
-                    visible: root.llm !== null && root.runners.length > 0
+                    visible: (root.llm !== null || root.jobs.length > 0) && root.runners.length > 0
                     groupKey: "runners"
                     text: i18n("Runners")
                 }

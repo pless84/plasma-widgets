@@ -16,6 +16,8 @@ KCM.SimpleKCM {
     property alias cfg_showTotalInPanel: showTotalInPanel.checked
     property alias cfg_showLlmInPanel: showLlmInPanel.checked
     property alias cfg_notifyOnLlmDown: notifyOnLlmDown.checked
+    property alias cfg_showJobsInPanel: showJobsInPanel.checked
+    property alias cfg_notifyOnJobProblem: notifyOnJobProblem.checked
 
     Kirigami.FormLayout {
         QQC2.TextField {
@@ -67,6 +69,10 @@ KCM.SimpleKCM {
             id: showLlmInPanel
             text: i18n("Local LLMs (GPU load; red if a server is down)")
         }
+        QQC2.CheckBox {
+            id: showJobsInPanel
+            text: i18n("Scheduled jobs, while one has failed or missed its run")
+        }
 
         QQC2.CheckBox {
             id: notifyOnOffline
@@ -80,6 +86,10 @@ KCM.SimpleKCM {
         QQC2.CheckBox {
             id: notifyOnLlmDown
             text: i18n("Notify when a local LLM server goes down")
+        }
+        QQC2.CheckBox {
+            id: notifyOnJobProblem
+            text: i18n("Notify when a scheduled job fails or misses its run")
         }
     }
 }

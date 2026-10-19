@@ -147,3 +147,43 @@ test("llmChanges: servers going down, never on the first check", () => {
     const second = L.llmChanges(llm({ ollama: { up: false }, mlx: [{ label: "dk.pless.mlx-rpr", up: false }] }), first.snapshot)
     assert.deepEqual(second.wentDown.map(s => s.key), ["dk.pless.mlx-rpr"])
 })
+
+function job(name, status, extra = {}) {
+    return { label: "dk.pless." + name, name, status, schedule: "daily 03:30", last_run: 100, log: [], ...extra }
+}
+
+test("jobState: ok, running and waiting; anything else is a problem", () => {
+    assert.equal(L.jobState(job("a", "ok")), "idle")
+    assert.equal(L.jobState(job("a", "running")), "busy")
+    assert.equal(L.jobState(job("a", "waiting")), "waiting")
+    for (const status of ["failed", "missed", "not loaded", "error", "something new", undefined]) {
+        assert.equal(L.jobState(job("a", status)), "offline", String(status))
+    }
+    assert.deepEqual(L.failingJobs([job("a", "ok"), job("b", "missed"), job("c", "failed")]).map(j => j.name), ["b", "c"])
+    assert.deepEqual(L.failingJobs(undefined), [])
+})
+
+test("sortJobs: failing first, then by name", () => {
+    const sorted = L.sortJobs([job("z", "ok"), job("b", "ok"), job("y", "failed"), job("a", "missed")])
+    assert.deepEqual(sorted.map(j => j.name), ["a", "y", "b", "z"])
+    assert.deepEqual(L.sortJobs(undefined), [])
+})
+
+test("lastLogLine is the newest line (the dashboard lists newest first)", () => {
+    assert.equal(L.lastLogLine(job("a", "ok")), null)
+    assert.equal(L.lastLogLine(job("a", "ok", { log: [{ time: 2, text: "saved" }, { time: 1, text: "ping" }] })).text, "saved")
+})
+
+test("jobChanges: newly failing jobs and repeat failures, never on the first check", () => {
+    const first = L.jobChanges([job("a", "failed"), job("b", "ok")], null)
+    assert.deepEqual(first.newlyFailing, [])
+    assert.deepEqual(first.snapshot["dk.pless.a"], { failing: true, lastRun: 100 })
+    // a is still failing from the same run: no repeat; b just failed.
+    const second = L.jobChanges([job("a", "failed"), job("b", "failed", { last_run: 200 })], first.snapshot)
+    assert.deepEqual(second.newlyFailing.map(j => j.name), ["b"])
+    // a ran again and failed again; b is fine now.
+    const third = L.jobChanges([job("a", "failed", { last_run: 300 }), job("b", "ok", { last_run: 300 })], second.snapshot)
+    assert.deepEqual(third.newlyFailing.map(j => j.name), ["a"])
+    // A job that appears already failing (e.g. newly installed) waits for the next change.
+    assert.deepEqual(L.jobChanges([job("c", "missed")], third.snapshot).newlyFailing, [])
+})
