@@ -22,6 +22,14 @@
       <label>Send a notification when a job fails</label>
       <default>true</default>
     </entry>
+    <entry name="notifyOnHungJob" type="Bool">
+      <label>Send a notification when a job runs far longer than usual (it may be stuck)</label>
+      <default>false</default>
+    </entry>
+    <entry name="notifyOnLowDisk" type="Bool">
+      <label>Send a notification when the dashboard's disk is almost full</label>
+      <default>true</default>
+    </entry>
     <entry name="showOfflineInPanel" type="Bool">
       <label>Show the offline badge</label>
       <default>true</default>

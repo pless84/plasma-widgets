@@ -16,6 +16,8 @@ KCM.SimpleKCM {
     property alias cfg_showTotalInPanel: showTotalInPanel.checked
     property alias cfg_showJobsInPanel: showJobsInPanel.checked
     property alias cfg_notifyOnJobProblem: notifyOnJobProblem.checked
+    property alias cfg_notifyOnHungJob: notifyOnHungJob.checked
+    property alias cfg_notifyOnLowDisk: notifyOnLowDisk.checked
 
     Kirigami.FormLayout {
         QQC2.TextField {
@@ -80,6 +82,14 @@ KCM.SimpleKCM {
         QQC2.CheckBox {
             id: notifyOnJobProblem
             text: i18n("Notify when a scheduled job fails or misses its run")
+        }
+        QQC2.CheckBox {
+            id: notifyOnHungJob
+            text: i18n("Notify when a job runs over twice as long as usual")
+        }
+        QQC2.CheckBox {
+            id: notifyOnLowDisk
+            text: i18n("Notify when the disk has less than 10% free")
         }
     }
 }

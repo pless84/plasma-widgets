@@ -24,6 +24,10 @@ PlasmoidItem {
     property real serverNow: 0
     // What Logic.changes() returned last time; null until the first check.
     property var snapshot: null
+    // What Logic.hungJobs() returned last time; null until the first check.
+    property var hungKeys: null
+    // Whether the disk was low at the last check; null until the first check.
+    property var diskWasLow: null
     property bool loaded: false
     property date lastChecked
     property string errorText: ""
@@ -108,6 +112,32 @@ PlasmoidItem {
         return time ? i18n("%1 ago", Logic.formatDuration(serverNow - time)) : "–"
     }
 
+    // Why an offline runner is down, e.g. "crashed · exit 1 · 7 runs"; "" when unknown.
+    function offlineReasonText(runner) {
+        const reason = Logic.offlineReason(runner)
+        if (!reason) {
+            return ""
+        }
+        if (reason.kind === "notLoaded") {
+            return i18n("service not loaded")
+        }
+        return [
+            reason.kind === "crashed" ? i18n("crashed") : i18n("stopped"),
+            reason.exitCode !== null ? i18n("exit %1", reason.exitCode) : "",
+            reason.runs !== null ? i18np("%1 run", "%1 runs", reason.runs) : "",
+        ].filter(t => t).join(" · ")
+    }
+
+    // The running job's line: "build in CI · running 14m 2s", with the usual duration when known.
+    function runningText(runner) {
+        const job = runner.job
+        const timing = Logic.jobTiming(runner, serverNow)
+        const text = i18n("%1 in %2 · running %3", job.job || i18n("job"), job.workflow || i18n("workflow"),
+            Logic.formatDuration(serverNow - job.started))
+        return timing && timing.usual !== null
+            ? i18n("%1 · usually %2", text, Logic.formatDuration(timing.usual)) : text
+    }
+
     function refresh() {
         if (!serverUrl || loading) {
             return
@@ -137,10 +167,14 @@ PlasmoidItem {
 
     function apply(data) {
         const result = Logic.changes(data.runners, snapshot)
+        const hungResult = Logic.hungJobs(data.runners, data.now, hungKeys)
+        const diskResult = Logic.lowDiskChange(data.host, diskWasLow)
         serverNow = data.now
         host = data.host
         runners = data.runners
         snapshot = result.snapshot
+        hungKeys = hungResult.keys
+        diskWasLow = diskResult.low
         jobs = data.jobs || []
         const jobResult = Logic.jobChanges(jobs, jobSnapshot)
         jobSnapshot = jobResult.snapshot
@@ -160,7 +194,10 @@ PlasmoidItem {
 
         if (result.wentOffline.length > 0 && Plasmoid.configuration.notifyOnOffline) {
             notification.title = i18np("Runner offline", "%1 runners offline", result.wentOffline.length)
-            notification.text = result.wentOffline.map(r => Logic.title(r)).join("\n")
+            notification.text = result.wentOffline.map(r => {
+                const why = offlineReasonText(r)
+                return Logic.title(r) + (why ? " · " + why : "")
+            }).join("\n")
             notification.sendEvent()
         }
         if (result.failedJobs.length > 0 && Plasmoid.configuration.notifyOnFailedJob) {
@@ -171,6 +208,17 @@ PlasmoidItem {
             notification.text = result.failedJobs.slice(0, 4).map(f => f.job.name + " · " + Logic.title(f.runner)).join("\n")
             notification.sendEvent()
         }
+        // Each has its own notification, so none replaces one sent above in the same check.
+        if (hungResult.hung.length > 0 && Plasmoid.configuration.notifyOnHungJob) {
+            hungNotification.title = i18np("A job may be stuck", "%1 jobs may be stuck", hungResult.hung.length)
+            hungNotification.text = hungResult.hung.slice(0, 4).map(r => Logic.title(r) + " · " + runningText(r)).join("\n")
+            hungNotification.sendEvent()
+        }
+        if (diskResult.notify && Plasmoid.configuration.notifyOnLowDisk) {
+            diskNotification.title = data.host.hostname ? i18n("Low disk space on %1", data.host.hostname) : i18n("Low disk space")
+            diskNotification.text = i18n("%1 of %2 GB free", data.host.disk_free_gb, data.host.disk_total_gb)
+            diskNotification.sendEvent()
+        }
     }
 
     onServerUrlChanged: {
@@ -178,6 +226,8 @@ PlasmoidItem {
         runners = []
         host = null
         snapshot = null
+        hungKeys = null
+        diskWasLow = null
         jobs = []
         jobSnapshot = null
         errorText = ""
@@ -247,6 +297,22 @@ PlasmoidItem {
         componentName: "plasma_workspace"
         eventId: "notification"
         iconName: "run-build"
+    }
+
+    // Likewise for a stuck job...
+    Notification {
+        id: hungNotification
+        componentName: "plasma_workspace"
+        eventId: "notification"
+        iconName: "run-build"
+    }
+
+    // ...and for low disk space.
+    Notification {
+        id: diskNotification
+        componentName: "plasma_workspace"
+        eventId: "notification"
+        iconName: "drive-harddisk"
     }
 
     Timer {
@@ -553,11 +619,14 @@ PlasmoidItem {
                 Layout.rightMargin: Kirigami.Units.smallSpacing
                 Layout.topMargin: Kirigami.Units.smallSpacing
                 visible: root.host !== null
-                opacity: 0.7
+                opacity: Logic.diskLow(root.host) ? 1 : 0.7
                 font: Kirigami.Theme.smallFont
                 elide: Text.ElideRight
+                color: Logic.diskLow(root.host) ? root.stateColor("offline") : Kirigami.Theme.textColor
                 text: root.host
-                    ? i18n("%1 · load %2 · up %3 · %4 of %5 GB free", root.host.hostname, (root.host.load || []).join(" / "),
+                    ? i18n("%1 · load %2 · up %3 · %4 of %5 GB free", root.host.hostname,
+                        Logic.loadPerCore(root.host) !== null
+                            ? i18n("%1 per core", Logic.loadPerCore(root.host).toFixed(2)) : (root.host.load || []).join(" / "),
                         Logic.formatDuration(root.host.uptime), root.host.disk_free_gb, root.host.disk_total_gb)
                     : ""
             }
@@ -689,11 +758,16 @@ PlasmoidItem {
                         readonly property string runnerState: Logic.runnerState(modelData)
                         readonly property var job: modelData.job
                         readonly property var last: Logic.lastJob(modelData)
-                        readonly property int problemCount: (modelData.problems || []).length
+                        readonly property var problems: Logic.recentProblems(modelData, root.serverNow)
+                        readonly property int problemCount: problems.length
+                        readonly property var timing: Logic.jobTiming(modelData, root.serverNow)
+                        readonly property string offlineWhy: root.offlineReasonText(modelData)
+                        readonly property var results: Logic.recentResults(modelData)
 
                         Layout.fillWidth: true
                         onClicked: if (Logic.actionsUrl(modelData)) Qt.openUrlExternally(Logic.actionsUrl(modelData))
-                        PlasmaComponents.ToolTip.text: Logic.actionsUrl(modelData)
+                        PlasmaComponents.ToolTip.text: [Logic.actionsUrl(modelData),
+                            problemCount > 0 ? problems[0].msg : ""].filter(t => t).join("\n")
                         PlasmaComponents.ToolTip.visible: hovered && PlasmaComponents.ToolTip.text !== ""
 
                         contentItem: ColumnLayout {
@@ -723,16 +797,37 @@ PlasmoidItem {
                                 }
                             }
 
+                            // Why the runner is offline.
+                            PlasmaComponents.Label {
+                                textFormat: Text.PlainText
+                                Layout.fillWidth: true
+                                visible: runnerItem.offlineWhy !== ""
+                                elide: Text.ElideRight
+                                font: Kirigami.Theme.smallFont
+                                color: root.stateColor("offline")
+                                text: runnerItem.offlineWhy
+                            }
+
                             // The running job.
                             PlasmaComponents.Label {
                                 textFormat: Text.PlainText
                                 Layout.fillWidth: true
                                 visible: !!runnerItem.job
                                 elide: Text.ElideRight
-                                text: runnerItem.job
-                                    ? i18n("%1 in %2 · running %3", runnerItem.job.job || i18n("job"), runnerItem.job.workflow || i18n("workflow"),
-                                        Logic.formatDuration(root.serverNow - runnerItem.job.started))
-                                    : ""
+                                // Amber (the busy colour) once it runs past twice its usual duration.
+                                color: runnerItem.timing && runnerItem.timing.slow ? root.stateColor("busy") : Kirigami.Theme.textColor
+                                text: runnerItem.job ? root.runningText(runnerItem.modelData) : ""
+                            }
+
+                            // Which run it is: "#412 · main · push by pless84".
+                            PlasmaComponents.Label {
+                                textFormat: Text.PlainText
+                                Layout.fillWidth: true
+                                visible: text !== ""
+                                elide: Text.ElideRight
+                                font: Kirigami.Theme.smallFont
+                                opacity: 0.7
+                                text: Logic.jobContext(runnerItem.job)
                             }
 
                             // The last finished job.
@@ -759,8 +854,23 @@ PlasmoidItem {
                                     runnerItem.modelData.name,
                                     runnerItem.modelData.version ? "v" + runnerItem.modelData.version : "",
                                     runnerItem.runnerState !== "offline" ? i18n("up %1", Logic.formatDuration(runnerItem.modelData.uptime)) : "",
+                                    Logic.formatMb(runnerItem.modelData.work_mb) ? i18n("work %1", Logic.formatMb(runnerItem.modelData.work_mb)) : "",
+                                    runnerItem.results ? i18n("%1/%2 passed", runnerItem.results.passed, runnerItem.results.total) : "",
                                     runnerItem.problemCount > 0 ? i18np("%1 recent warning", "%1 recent warnings", runnerItem.problemCount) : "",
                                 ].filter(s => s).join(" · ")
+                            }
+
+                            // The newest warning from the last 24 hours, with its age.
+                            PlasmaComponents.Label {
+                                textFormat: Text.PlainText
+                                Layout.fillWidth: true
+                                visible: runnerItem.problemCount > 0
+                                elide: Text.ElideRight
+                                font: Kirigami.Theme.smallFont
+                                opacity: 0.7
+                                text: runnerItem.problemCount > 0
+                                    ? (runnerItem.problems[0].time === null ? runnerItem.problems[0].msg
+                                       : i18n("%1: %2", root.ago(runnerItem.problems[0].time), runnerItem.problems[0].msg)) : ""
                             }
                         }
                     }

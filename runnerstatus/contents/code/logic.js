@@ -70,6 +70,174 @@ function formatDuration(seconds) {
     return d ? d + "d " + h + "h" : h ? h + "h " + m + "m" : m ? m + "m " + s % 60 + "s" : s + "s"
 }
 
+// ---- Running job context and duration ----
+
+// "#412 · main · push by pless84" from the running job's run_number, ref, event_name and actor.
+// Any of them may be missing; "" when none is known.
+function jobContext(job) {
+    if (!job) {
+        return ""
+    }
+    const ref = String(job.ref || "").replace(/^refs\/heads\//, "")
+    const who = job.event_name && job.actor ? job.event_name + " by " + job.actor
+        : job.actor ? "by " + job.actor : job.event_name || ""
+    return [job.run_number ? "#" + job.run_number : "", ref, who].filter(t => t).join(" · ")
+}
+
+// The median duration (seconds) of succeeded jobs of this name in the runner's history, or null
+// with fewer than 3 samples. Jobs without a start time are skipped, and so are failed, canceled
+// and skipped ones (they end early and would make a normal run look slow).
+function usualDuration(runner, jobName) {
+    const durations = (runner.history || [])
+        .filter(h => h.name === jobName && h.result === "Succeeded" && h.started && h.finished > h.started)
+        .map(h => h.finished - h.started)
+        .sort((a, b) => a - b)
+    if (!jobName || durations.length < 3) {
+        return null
+    }
+    const mid = Math.floor(durations.length / 2)
+    return durations.length % 2 ? durations[mid] : (durations[mid - 1] + durations[mid]) / 2
+}
+
+// How long the runner's current job has run (`now` is the server's clock) against its usual
+// duration: {running, usual, slow}, or null when no job runs. `usual` is null when unknown;
+// `slow` is set past twice the usual duration and at least SLOW_MIN_EXTRA seconds beyond it, so
+// a job that usually takes seconds isn't called slow after a few more.
+var SLOW_MIN_EXTRA = 300
+
+function jobTiming(runner, now) {
+    const job = runner.job
+    if (!job || !job.started || !now) {
+        return null
+    }
+    const running = Math.max(0, now - job.started)
+    const usual = usualDuration(runner, job.job)
+    return { running: running, usual: usual, slow: usual !== null && running > 2 * usual && running - usual >= SLOW_MIN_EXTRA }
+}
+
+// Runners whose job runs far past its usual duration, for the "likely hung" notification.
+// `previous` is the list of keys this returned last time, or null on the first check (which
+// never notifies); each job is reported once.
+function hungJobs(runners, now, previous) {
+    const keys = []
+    const fresh = []
+    runners.forEach(r => {
+        const timing = jobTiming(r, now)
+        if (timing && timing.slow) {
+            const key = (r.dir || title(r)) + "@" + r.job.started
+            keys.push(key)
+            if (previous && !previous.includes(key)) {
+                fresh.push(r)
+            }
+        }
+    })
+    return { keys: keys, hung: fresh }
+}
+
+// ---- Why a runner is offline ----
+
+function exitCodeOf(value) {
+    const n = parseInt(value, 10)
+    return isNaN(n) ? null : n
+}
+
+// Why an offline runner is down, from launchd: {kind: "notLoaded"} when its service isn't loaded,
+// {kind: "crashed", exitCode, runs} after a non-zero exit, {kind: "stopped", exitCode, runs}
+// otherwise (loaded but not listening). null when the runner isn't offline or nothing is known.
+function offlineReason(runner) {
+    const svc = runner.launchd
+    if (runnerState(runner) !== "offline" || !svc) {
+        return null
+    }
+    if (svc.loaded === false) {
+        return { kind: "notLoaded" }
+    }
+    if (svc.loaded !== true) {
+        return null
+    }
+    const exitCode = exitCodeOf(svc.last_exit_code)
+    return { kind: exitCode ? "crashed" : "stopped", exitCode: exitCode, runs: exitCodeOf(svc.runs) }
+}
+
+// ---- Host ----
+
+// One-minute load per CPU core, or null when unknown.
+function loadPerCore(host) {
+    const load = host && host.load && host.load[0]
+    return host && host.cpus > 0 && typeof load === "number" ? load / host.cpus : null
+}
+
+// Free disk space in percent, or null when unknown.
+function diskFreePercent(host) {
+    return host && host.disk_total_gb > 0 && typeof host.disk_free_gb === "number"
+        ? host.disk_free_gb / host.disk_total_gb * 100 : null
+}
+
+var lowDiskPercent = 10
+
+// Free space (percent) above which a low-disk warning is cleared, so a disk hovering around the
+// limit doesn't notify again and again.
+var lowDiskClearPercent = 12
+
+function diskLow(host) {
+    const free = diskFreePercent(host)
+    return free !== null && free < lowDiskPercent
+}
+
+// {low, notify}: notify is set once, when free space drops below the limit; it is low until
+// free space is back above lowDiskClearPercent. `wasLow` is the previous low, or null before the
+// first check with host data (which never notifies). Without host data `low` stays as it was.
+function lowDiskChange(host, wasLow) {
+    const free = diskFreePercent(host)
+    if (free === null) {
+        return { low: wasLow, notify: false }
+    }
+    const low = wasLow === true ? free <= lowDiskClearPercent : free < lowDiskPercent
+    return { low: low, notify: low && wasLow === false }
+}
+
+// Megabytes as "640 MB" or "1.4 GB"; "" when unknown.
+function formatMb(mb) {
+    if (typeof mb !== "number" || isNaN(mb)) {
+        return ""
+    }
+    return mb >= 1024 ? (mb / 1024).toFixed(1) + " GB" : Math.round(mb) + " MB"
+}
+
+// ---- Warnings and recent results ----
+
+// A problem's time as seconds since the epoch: a number as is, an ISO-like string parsed, else null.
+function problemTime(time) {
+    if (typeof time === "number" && !isNaN(time)) {
+        return time
+    }
+    const parsed = typeof time === "string" ? Date.parse(time.trim().replace(" ", "T")) / 1000 : NaN
+    return isNaN(parsed) ? null : parsed
+}
+
+// The warning/error log lines (newest first) from the last 24 hours, as {time, msg, …}. The
+// dashboard sends the last 5 whatever their age. One without a usable time can't be aged, so it
+// is kept (with time null) rather than hidden, after the ones with a time.
+function recentProblems(runner, now) {
+    return (runner.problems || [])
+        .map(p => Object.assign({}, p, { time: problemTime(p.time) }))
+        .filter(p => p.time === null || now - p.time <= 86400)
+        .sort((a, b) => (b.time === null ? -Infinity : b.time) - (a.time === null ? -Infinity : a.time))
+}
+
+// The runner's last up to 10 results, newest first: {total, passed, results}, or null without any.
+// Canceled and skipped jobs count as passed (they are not failures, see jobFailed).
+function recentResults(runner) {
+    const results = (runner.history || [])
+        .slice()
+        .sort((a, b) => (b.finished || 0) - (a.finished || 0))
+        .slice(0, 10)
+        .map(h => h.result)
+    return results.length > 0
+        ? { total: results.length, passed: results.filter(r => !jobFailed({ result: r })).length, results: results }
+        : null
+}
+
 // What changed since the previous check, for notifications: runners that went offline, and jobs
 // that failed since then. `previous` is the snapshot this returned last time, or null on the first
 // check (which never notifies). Runners are told apart by their directory, as names repeat.
