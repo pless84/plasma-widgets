@@ -129,12 +129,13 @@ def newest(deployments, accept=is_service_deployment):
 
 
 def latest_deployments(server, key, projects):
-    """({service id: newest deployment}, {service id: server name}) for applications and compose
-    stacks. Uses deployment.allCentralized: one call (with the whole history, so a longer
-    timeout). A service missing from it is not known to be never deployed, so it just has no
-    entry. A server name is only taken from a relation the reply embeds. Without that call
-    (older Dokploy, a timeout, a reply that is not JSON), deployment.all / deployment.allByCompose
-    are asked for the failed services only."""
+    """({service id: newest deployment}, {service id: server name}, complete) for applications
+    and compose stacks. Uses deployment.allCentralized: one call with the whole deployment history
+    (so a longer timeout), checked against a real Dokploy to cover every deployed service; then
+    complete is True and a service missing from it has never been deployed. A server name is only
+    taken from a relation the reply embeds. Without that call (older Dokploy, a timeout, a reply
+    that is not JSON), deployment.all / deployment.allByCompose are asked for the failed services
+    only, and complete is False."""
     rows = call(server, key, "deployment.allCentralized", soft=True, timeout=120)
     deployments, servers = {}, {}
     if isinstance(rows, list):
@@ -150,7 +151,7 @@ def latest_deployments(server, key, projects):
                     servers[service_id] = (related["server"] or {}).get("name") or ""
                 if service_id not in deployments or (d.get("createdAt") or "") > (deployments[service_id].get("createdAt") or ""):
                     deployments[service_id] = d
-        return {i: deployment_out(d) for i, d in deployments.items()}, servers
+        return {i: deployment_out(d) for i, d in deployments.items()}, servers, True
     for project in projects:
         for env in project.get("environments", []):
             for kind, status_key, endpoint, listing in (("application", "applicationStatus", "deployment.all", "applications"),
@@ -160,7 +161,7 @@ def latest_deployments(server, key, projects):
                         d = newest(call(server, key, endpoint, {f"{kind}Id": service[f"{kind}Id"]}, soft=True))
                         if d:
                             deployments[service[f"{kind}Id"]] = deployment_out(d)
-    return deployments, servers
+    return deployments, servers, False
 
 
 def backup_run_out(d):
@@ -182,13 +183,15 @@ def backups_out(backups):
 
 
 def service_extras(latest, service_id):
-    """The newest deployment and the server name of an application or compose stack, each left
-    out when Dokploy did not say (a service missing from the deployments may be one never
-    deployed or one the reply did not cover)."""
-    deployments, servers = latest
+    """The newest deployment and the server name of an application or compose stack. The
+    deployment is None (never deployed) when the full history doesn't have one, and left out when
+    only some services were asked (unknown). The server is left out when Dokploy didn't say."""
+    deployments, servers, complete = latest
     out = {}
     if service_id in deployments:
         out["deployment"] = deployments[service_id]
+    elif complete:
+        out["deployment"] = None
     if service_id in servers:
         out["server"] = servers[service_id]
     return out

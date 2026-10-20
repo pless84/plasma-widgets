@@ -55,7 +55,7 @@ def test_fetch(dokploy, run):
     assert json.loads(result.stdout) == {"projects": [{"id": "p1", "name": "Shop", "environments": [{
         "id": "e1", "name": "production", "services": [
             {"type": "application", "id": "a1", "name": "web", "status": "done", "deployment": dep, "server": "edge-1"},
-            {"type": "compose", "id": "c1", "name": "stack", "status": "running"},     # not in allCentralized: unknown
+            {"type": "compose", "id": "c1", "name": "stack", "status": "running", "deployment": None},  # not in the history: never deployed
             {"type": "postgres", "id": "d1", "name": "shop-db", "status": "error", "server": "edge-1", "backups": [{
                 "enabled": True, "schedule": "0 3 * * *", "last": {
                     "id": "b2", "status": "error",
@@ -164,13 +164,14 @@ def test_fetch_redacts_deployment_errors_and_drops_backup_errors(dokploy, run):
     assert web["server"] == ""      # the relation is embedded and has no server: the Dokploy host
 
 
-def test_fetch_service_missing_from_all_centralized_is_unknown_and_server_needs_a_relation(dokploy, run):
+def test_fetch_service_missing_from_all_centralized_was_never_deployed_and_server_needs_a_relation(dokploy, run):
     dokploy.add("GET /api/deployment.allCentralized", [
         {"deploymentId": "x1", "applicationId": "a1", "status": "done", "createdAt": "2026-10-01T10:00:00Z"}])
     services = json.loads(run("dokploystatus", "dokploy.py", "fetch", dokploy.url).stdout)["projects"][0]["environments"][0]["services"]
     web, stack = services[0], services[1]
     assert web["deployment"]["id"] == "x1" and "server" not in web      # no application relation embedded: no server
-    assert "deployment" not in stack and "server" not in stack
+    # allCentralized is the whole history (checked against a real Dokploy), so no entry means never deployed.
+    assert stack["deployment"] is None and "server" not in stack
 
 
 class Reply:
