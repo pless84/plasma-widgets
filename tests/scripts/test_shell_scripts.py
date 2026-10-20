@@ -1,4 +1,4 @@
-"""fetch.sh / action.sh for PRTG, Docker and GitHub Account; gpu.sh for LLM Status."""
+"""fetch.sh / action.sh for PRTG, Docker and GitHub Account."""
 import json
 import shutil
 from urllib.parse import parse_qs, urlsplit
@@ -16,12 +16,17 @@ def test_prtg_fetch(server, stubs, run):
     server.add("GET /api/table.json", {"sensors": [{"objid": 1, "status_raw": 5}]})
     result = run("prtgstatus", "fetch.sh", server.url)
     assert result.returncode == 0, result.stderr
+    # The fake server answers every table.json alike, so the probes table isn't one and the
+    # counts fall back to every sensor (test_prtgstatus.py covers the root and probe rows).
     assert json.loads(result.stdout) == {"problems": {"sensors": [{"objid": 1, "status_raw": 5}]},
+                                         "root": {"probes": []},
+                                         "probes": {"probes": []},
                                          "all": {"sensors": [{"objid": 1, "status_raw": 5}]},
                                          "extra": {"sensors": []}}
-    problems, everything = (parse_qs(urlsplit(r["path"]).query) for r in server.requests)
+    queries = [parse_qs(urlsplit(r["path"]).query) for r in server.requests]
+    problems, everything = queries[0], queries[-1]
     assert problems["filter_status"] == ["4", "5", "10", "13", "14"]
-    assert problems["apitoken"] == everything["apitoken"] == ["k3y"]
+    assert all(q["apitoken"] == ["k3y"] for q in queries)
     assert "filter_status" not in everything
 
 
@@ -105,6 +110,23 @@ def test_docker_images(docker, run):
     assert docker.calls("docker")[-1]["args"][:3] == ["--context", "colima", "image"]
 
 
+def test_docker_inspect(docker, run):
+    assert run("dockerstatus", "inspect.sh", "", "a1", "b2").stdout == '{"ID":"a1"}\n'
+    args = docker.calls("docker")[-1]["args"]
+    assert args[0] == "inspect" and args[1] == "--format" and args[3:] == ["a1", "b2"]
+    assert "{{json .State}}" in args[2] and ".RestartCount" in args[2]
+    run("dockerstatus", "inspect.sh", "colima", "a1")
+    assert docker.calls("docker")[-1]["args"][:3] == ["--context", "colima", "inspect"]
+    assert docker.calls("docker")[-1]["args"][-1] == "a1"
+
+
+def test_docker_df(docker, run):
+    assert run("dockerstatus", "df.sh", "").stdout == '{"ID":"a1"}\n'
+    assert docker.calls("docker")[-1]["args"] == ["system", "df", "--format", "{{json .}}"]
+    run("dockerstatus", "df.sh", "colima")
+    assert docker.calls("docker")[-1]["args"][:3] == ["--context", "colima", "system"]
+
+
 @pytest.mark.parametrize("context, expected", [
     ("", ["compose", "--project-name", "shop", "stop"]),
     ("colima", ["--context", "colima", "compose", "--project-name", "shop", "stop"]),
@@ -159,22 +181,3 @@ def test_github_fetch_unknown_account(gh, run):
 def test_github_mark_read(gh, run):
     assert run("githubaccount", "fetch.sh", "", "mark-read").returncode == 0
     assert gh.calls("gh")[0]["args"] == ["api", "-X", "PUT", "notifications", "--silent"]
-
-
-# LLM Status: gpu.sh with a stub nvidia-smi.
-
-def test_llm_gpu_nvidia(stubs, run):
-    stubs.add("nvidia-smi", 'echo "37, 2471, 12227, NVIDIA GeForce RTX 5070"')
-    result = run("llmstatus", "gpu.sh")
-    assert result.returncode == 0
-    assert result.stdout == "37, 2471, 12227, NVIDIA GeForce RTX 5070\n"
-    assert stubs.calls("nvidia-smi")[-1]["args"] == [
-        "--query-gpu=utilization.gpu,memory.used,memory.total,name", "--format=csv,noheader,nounits"]
-
-
-def test_llm_gpu_nvidia_failing_is_not_an_error(stubs, run):
-    # e.g. the driver isn't loaded: the script falls back to AMD's counters and still succeeds.
-    stubs.add("nvidia-smi", "echo 'NVIDIA-SMI has failed' >&2; exit 9")
-    result = run("llmstatus", "gpu.sh")
-    assert result.returncode == 0
-    assert "NVIDIA-SMI has failed" not in result.stdout

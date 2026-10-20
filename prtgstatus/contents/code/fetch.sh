@@ -1,8 +1,10 @@
 #!/bin/sh
-# Prints {"problems": <table>, "all": <table>, "extra": <table>} from PRTG's sensor table API:
-# full details for every sensor that is not Up or paused, just the status of every sensor
-# (for the per-state counts), and full details for the sensors in the extra status codes
-# (the other states the widget lists; an empty table when none are given).
+# Prints {"problems": <table>, "root": <table>, "probes": <table>, "all": <table>, "extra": <table>} from PRTG's
+# table API: full details for every sensor that is not Up or paused, the per-state sensor counts
+# of every probe (cheap, and the source of the widget's counts), just the status of every sensor
+# (only fetched when the probes table is unusable, as the old way to count), and full details
+# for the sensors in the extra status codes (the other states the widget lists; an empty table
+# when none are given).
 # Usage: fetch.sh <server-url> [<comma-separated status codes>]
 # The API key is read from the keyring. The widget's settings page saves it there,
 # or it can be stored by hand with:
@@ -29,8 +31,24 @@ fetch() {
 }
 
 # Status codes: 4 Warning, 5 Down, 10 Unusual, 13 Down (acknowledged), 14 Down (partial)
-problems=$(fetch "content=sensors&count=500&columns=objid,device,sensor,status,status_raw,message_raw,lastvalue&filter_status=4&filter_status=5&filter_status=10&filter_status=13&filter_status=14")
-all=$(fetch "content=sensors&count=50000&columns=objid,status_raw")
+columns="objid,device,sensor,status,status_raw,message_raw,lastvalue,priority,downtimesince,probe,group"
+problems=$(fetch "content=sensors&count=500&columns=$columns&filter_status=4&filter_status=5&filter_status=10&filter_status=13&filter_status=14")
+
+# The counts. content=probes lists every object in the tree (root, probes, groups, devices),
+# each with the sensor counts of everything below it. The root row (objid 0) holds the totals,
+# and the root's children are the probes, for the per-probe lines. If PRTG doesn't answer with
+# the root row, count every sensor instead.
+counts="objid,probe,upsens,downsens,partialdownsens,downacksens,warnsens,unusualsens,pausedsens,undefinedsens,totalsens"
+root=$(fetch "content=probes&count=1&columns=$counts&filter_objid=0" 2>/dev/null) || root=""
+probes=$(fetch "content=probes&count=100&columns=$counts&filter_parentid=0" 2>/dev/null) || probes=""
+case $root in
+    *'"probes"'*'"objid"'*) all='{"sensors":[]}' ;;
+    *) root='{"probes":[]}'; all=$(fetch "content=sensors&count=50000&columns=objid,status_raw") ;;
+esac
+case $probes in
+    *'"probes"'*) ;;
+    *) probes='{"probes":[]}' ;;
+esac
 
 extra='{"sensors":[]}'
 if [ -n "$extra_codes" ]; then
@@ -41,7 +59,7 @@ if [ -n "$extra_codes" ]; then
         esac
         filter="$filter&filter_status=$code"
     done
-    extra=$(fetch "content=sensors&count=500&columns=objid,device,sensor,status,status_raw,message_raw,lastvalue$filter")
+    extra=$(fetch "content=sensors&count=500&columns=$columns$filter")
 fi
 
-printf '{"problems":%s,"all":%s,"extra":%s}\n' "$problems" "$all" "$extra"
+printf '{"problems":%s,"root":%s,"probes":%s,"all":%s,"extra":%s}\n' "$problems" "$root" "$probes" "$all" "$extra"

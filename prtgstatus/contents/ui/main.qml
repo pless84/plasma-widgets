@@ -32,6 +32,10 @@ PlasmoidItem {
 
     // Number of sensors in each state below, keyed by state key.
     property var stateCounts: ({})
+    // Per-probe counts from Logic.probeSummaries; only shown when there is more than one probe.
+    property var probes: []
+    // Whether the listed sensors have different priorities (otherwise stars would only be noise).
+    property bool showPriority: false
 
     readonly property bool allGood: loaded && down.length === 0 && warning.length === 0 && unusual.length === 0
 
@@ -94,19 +98,39 @@ PlasmoidItem {
     }
 
     function apply(data) {
-        stateCounts = Logic.countStates(data.all.sensors)
+        // The root row gives the totals (the probes alone can miss sensors outside them);
+        // counting every sensor is the fallback.
+        probes = Logic.probeSummaries(data.probes && data.probes.probes)
+        const root = Logic.probeSummaries(data.root && data.root.probes)
+        stateCounts = root.length > 0 ? root[0].counts : Logic.countStates(data.all.sensors)
         const problems = Logic.splitProblems(data.problems.sensors)
         down = problems.down
         acknowledged = problems.acknowledged
         warning = problems.warning
         unusual = problems.unusual
         extraSensors = Logic.splitExtra(data.extra.sensors)
+        showPriority = Logic.prioritiesDiffer(data.problems.sensors.concat(data.extra.sensors))
         loaded = true
         notifyAboutNewDown()
     }
 
+    // "down 3 h 12 m", or "" when PRTG gave no down time
+    function downSince(sensor) {
+        const t = Logic.downFor(sensor)
+        return t ? i18n("down %1", t) : ""
+    }
+
+    // One probe's line: its name and counts per state, flagged when all its sensors are unknown.
+    function probeText(probe) {
+        const counts = sensorStates.filter(st => probe.counts[st.key] > 0)
+                                   .map(st => i18n("%1 %2", probe.counts[st.key], st.label.toLowerCase())).join(" · ")
+        return probe.name + ": " + counts + (probe.allUnknown ? " – " + i18n("all unknown, the probe may be down") : "")
+    }
+
+    readonly property string probeLines: probes.length > 1 ? "\n" + probes.map(probeText).join("\n") : ""
+
     function notifyAboutNewDown() {
-        const result = Logic.freshDown(down, seenDownIds)
+        const result = Logic.freshDown(down, seenDownIds, Plasmoid.configuration.notifyMinPriority)
         const fresh = result.fresh
         seenDownIds = result.seen
 
@@ -115,10 +139,11 @@ PlasmoidItem {
         }
         if (fresh.length === 1) {
             downNotification.title = i18n("PRTG: %1 is down", fresh[0].sensor)
-            downNotification.text = fresh[0].device + (fresh[0].message_raw ? "\n" + fresh[0].message_raw : "")
+            downNotification.text = [fresh[0].device, downSince(fresh[0]), fresh[0].message_raw].filter(t => t).join("\n")
         } else {
             downNotification.title = i18np("PRTG: %1 sensor went down", "PRTG: %1 sensors went down", fresh.length)
-            downNotification.text = fresh.slice(0, 4).map(s => s.device + " – " + s.sensor).join("\n")
+            downNotification.text = fresh.slice(0, 4).map(s => s.device + " – " + s.sensor
+                                                          + (Logic.downFor(s) ? " (" + Logic.downFor(s) + ")" : "")).join("\n")
         }
         downNotification.sendEvent()
     }
@@ -210,7 +235,7 @@ PlasmoidItem {
         if (errorText) return errorText
         if (!loaded) return i18n("Loading…")
         if (visibleStates.length > 0) {
-            return visibleStates.map(st => i18n("%1 %2", stateCounts[st.key], st.label.toLowerCase())).join(" · ")
+            return visibleStates.map(st => i18n("%1 %2", stateCounts[st.key], st.label.toLowerCase())).join(" · ") + probeLines
         }
         if (allGood) return i18n("All sensors OK")
         return [
@@ -444,13 +469,19 @@ PlasmoidItem {
         }
     }
 
-    // One sensor in the popup: status dot, "device – sensor" and the PRTG message.
+    // One sensor in the popup: status dot, "device – sensor" and the PRTG message. The tooltip
+    // gives the whole path (probe › group › device – sensor).
     component SensorRow: PlasmaComponents.ItemDelegate {
         property var sensor
         property color dotColor
+        // Show how long it has been down (Down and Acknowledged rows).
+        property bool showDownTime: false
 
         Layout.fillWidth: true
         onClicked: Qt.openUrlExternally(root.sensorUrl(sensor))
+        PlasmaComponents.ToolTip.text: Logic.sensorPath(sensor)
+        PlasmaComponents.ToolTip.visible: hovered
+        PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
 
         contentItem: RowLayout {
             spacing: Kirigami.Units.smallSpacing
@@ -471,6 +502,17 @@ PlasmoidItem {
                     textFormat: Text.PlainText
                     Layout.fillWidth: true
                     text: sensor.device + " – " + sensor.sensor
+                    elide: Text.ElideRight
+                }
+                PlasmaComponents.Label {
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    text: [Logic.isPartial(sensor) ? i18n("(partial)") : "",
+                           showDownTime ? root.downSince(sensor) : "",
+                           root.showPriority ? Logic.stars(Logic.priorityOf(sensor)) : ""].filter(t => t).join(" · ")
+                    visible: text !== ""
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
                     elide: Text.ElideRight
                 }
                 PlasmaComponents.Label {
@@ -520,6 +562,9 @@ PlasmoidItem {
         property string title
         property var sensors: []
         property color dotColor
+        property bool showDownTime: false
+        // Sensors in this state according to the counts; more than are listed when the table was cut off.
+        readonly property int stateTotal: root.stateCounts[key] || 0
 
         Layout.fillWidth: true
         spacing: 0
@@ -528,7 +573,9 @@ PlasmoidItem {
         GroupHeader {
             id: header
             groupKey: group.key
-            text: i18n("%1 (%2)", group.title, group.sensors.length)
+            text: group.stateTotal > group.sensors.length
+                ? i18n("%1 (showing %2 of %3)", group.title, group.sensors.length, group.stateTotal)
+                : i18n("%1 (%2)", group.title, group.sensors.length)
         }
         Repeater {
             model: header.collapsed ? [] : sensors
@@ -536,6 +583,7 @@ PlasmoidItem {
                 required property var modelData
                 sensor: modelData
                 dotColor: group.dotColor
+                showDownTime: group.showDownTime
             }
         }
     }
@@ -658,10 +706,27 @@ PlasmoidItem {
                     text: root.errorText
                 }
 
-                SensorGroup { key: "down"; title: i18n("Down"); sensors: root.down; dotColor: root.downColor }
+                // Per-probe counts, when there are several probes.
+                Repeater {
+                    model: root.probes.length > 1 ? root.probes : []
+                    PlasmaComponents.Label {
+                        required property var modelData
+                        textFormat: Text.PlainText
+                        Layout.fillWidth: true
+                        Layout.leftMargin: Kirigami.Units.smallSpacing
+                        Layout.rightMargin: Kirigami.Units.smallSpacing
+                        text: root.probeText(modelData)
+                        opacity: 0.7
+                        font: Kirigami.Theme.smallFont
+                        elide: Text.ElideRight
+                        color: modelData.allUnknown ? root.downColor : Kirigami.Theme.textColor
+                    }
+                }
+
+                SensorGroup { key: "down"; title: i18n("Down"); sensors: root.down; dotColor: root.downColor; showDownTime: true }
                 SensorGroup { key: "warning"; title: i18n("Warning"); sensors: root.warning; dotColor: root.warningColor }
                 SensorGroup { key: "unusual"; title: i18n("Unusual"); sensors: root.unusual; dotColor: root.unusualColor }
-                SensorGroup { key: "acknowledged"; title: i18n("Acknowledged"); sensors: root.acknowledged; dotColor: Kirigami.Theme.disabledTextColor }
+                SensorGroup { key: "acknowledged"; title: i18n("Acknowledged"); sensors: root.acknowledged; dotColor: Kirigami.Theme.disabledTextColor; showDownTime: true }
 
                 // Unknown, paused and up sensors, for the states whose badge is switched on.
                 Repeater {

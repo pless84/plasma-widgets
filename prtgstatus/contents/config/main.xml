@@ -55,8 +55,14 @@
       <default></default>
     </entry>
     <entry name="notifyOnDown" type="Bool">
-      <label>Send a desktop notification when a sensor goes down</label>
+      <label>Send a desktop notification when sensors go down</label>
       <default>true</default>
+    </entry>
+    <entry name="notifyMinPriority" type="Int">
+      <label>Only notify about sensors going down at or above this priority (1 notifies for all)</label>
+      <default>1</default>
+      <min>1</min>
+      <max>5</max>
     </entry>
   </group>
   <group name="Appearance">

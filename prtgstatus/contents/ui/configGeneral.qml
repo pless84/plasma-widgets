@@ -11,6 +11,7 @@ KCM.SimpleKCM {
     property alias cfg_serverUrl: serverUrl.text
     property alias cfg_pollInterval: pollInterval.value
     property alias cfg_notifyOnDown: notifyOnDown.checked
+    property alias cfg_notifyMinPriority: notifyMinPriority.value
     property alias cfg_showDownInPanel: showDownInPanel.checked
     property alias cfg_showAcknowledgedInPanel: showAcknowledgedInPanel.checked
     property alias cfg_showWarningInPanel: showWarningInPanel.checked
@@ -212,7 +213,17 @@ KCM.SimpleKCM {
 
         QQC2.CheckBox {
             id: notifyOnDown
-            text: i18n("Notify when a sensor goes down")
+            text: i18n("Notify when sensors go down")
+        }
+
+        QQC2.SpinBox {
+            id: notifyMinPriority
+            enabled: notifyOnDown.checked
+            Kirigami.FormData.label: i18n("Notify from priority:")
+            from: 1
+            to: 5
+            textFromValue: (value, locale) => value === 1 ? i18n("1 (all sensors)") : i18n("%1 or higher", value)
+            valueFromText: (text, locale) => parseInt(text)
         }
     }
 }
