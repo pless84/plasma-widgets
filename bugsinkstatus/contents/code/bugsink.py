@@ -3,8 +3,9 @@
 
 Usage:
   bugsink.py fetch <server-url> [max-pages-per-project]
-      Prints {"projects": [...]} as JSON: per project its open issues (newest activity first)
-      and how many muted and resolved issues there are among the issues looked at.
+      Prints {"projects": [...]} as JSON: per project its open issues (newest activity first),
+      how many muted and resolved issues there are among the issues looked at, and the ids of
+      the resolved ones (so the widget can spot regressions).
   bugsink.py <resolve|mute|unmute> <server-url> <issue-id>
       Changes one issue.
 
@@ -19,7 +20,7 @@ import urllib.error
 import urllib.request
 
 ISSUE_FIELDS = ("id", "calculated_type", "calculated_value", "transaction", "first_seen", "last_seen",
-                "digested_event_count")
+                "digested_event_count", "friendly_id")
 
 
 def fail(message, code):
@@ -63,6 +64,15 @@ def paged(server, token, path, max_pages):
     yield bool(url)
 
 
+def friendly_id(issue, project):
+    """SHOP-42 as Bugsink shows it: the API's own friendly_id, else project slug + digest_order, else None."""
+    if issue.get("friendly_id"):
+        return issue["friendly_id"]
+    if project.get("slug") and issue.get("digest_order") is not None:
+        return f"{project['slug'].upper()}-{issue['digest_order']}"
+    return None
+
+
 def fetch(server, max_pages):
     token = token_for(server)
     projects = []
@@ -71,7 +81,7 @@ def fetch(server, max_pages):
         *issues, truncated = paged(server, token,
                                    f"/api/canonical/0/issues/?project={project['id']}&sort=last_seen&order=desc",
                                    max_pages)
-        open_issues = [{k: i.get(k) for k in ISSUE_FIELDS}
+        open_issues = [{**{k: i.get(k) for k in ISSUE_FIELDS}, "friendly_id": friendly_id(i, project)}
                        for i in issues if not i.get("is_resolved") and not i.get("is_muted")]
         projects.append({
             "id": project["id"],
@@ -79,6 +89,7 @@ def fetch(server, max_pages):
             "open": open_issues,
             "muted": sum(1 for i in issues if i.get("is_muted") and not i.get("is_resolved")),
             "resolved": sum(1 for i in issues if i.get("is_resolved")),
+            "resolved_ids": [i["id"] for i in issues if i.get("is_resolved")],
             "truncated": truncated,
         })
     print(json.dumps({"projects": projects}))

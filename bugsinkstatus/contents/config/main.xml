@@ -48,6 +48,10 @@
       <label>Send a desktop notification for new issues</label>
       <default>true</default>
     </entry>
+    <entry name="notifyOnRegression" type="Bool">
+      <label>Send a desktop notification when a resolved issue comes back</label>
+      <default>true</default>
+    </entry>
     <entry name="collapsedGroups" type="StringList">
       <label>Groups collapsed in the popup</label>
       <default></default>

@@ -22,6 +22,11 @@ PlasmoidItem {
     property var projects: []
     // Ids of issues already seen, to notify only about new ones; null until the first check.
     property var seenIssueIds: null
+    // What changed since the previous check (see Logic.changes); null until the first check.
+    property var changeSnapshot: null
+    // Ids of regressed issues (resolved on the previous check, open now) and {id: new events}.
+    property var regressedIds: ({})
+    property var activity: ({})
     // Ids of issues with a resolve/mute in progress.
     property var busyIds: ({})
     property bool loaded: false
@@ -105,12 +110,32 @@ PlasmoidItem {
     function apply(data) {
         projects = data.projects
         loaded = true
-        notifyAboutNew()
+        const changed = Logic.changes(projects, changeSnapshot)
+        changeSnapshot = changed.snapshot
+        regressedIds = changed.snapshot.regressed
+        activity = changed.activity
+        notifyAboutNew(changed.regressed)
+        notifyAboutRegressed(changed.regressed)
     }
 
-    function notifyAboutNew() {
+    function notifyAboutRegressed(regressed) {
+        if (regressed.length === 0 || !Plasmoid.configuration.notifyOnRegression) {
+            return
+        }
+        if (regressed.length === 1) {
+            regressedNotification.title = i18n("Bugsink: issue regressed in %1", regressed[0].project)
+            regressedNotification.text = issueTitle(regressed[0].issue)
+        } else {
+            regressedNotification.title = i18np("Bugsink: %1 issue regressed", "Bugsink: %1 issues regressed", regressed.length)
+            regressedNotification.text = regressed.slice(0, 4).map(o => o.project + " – " + issueTitle(o.issue)).join("\n")
+        }
+        regressedNotification.sendEvent()
+    }
+
+    function notifyAboutNew(regressed) {
         const result = Logic.freshIssues(projects, seenIssueIds)
-        const fresh = result.fresh
+        // A regression gets its own notification, even if the issue was never seen open before.
+        const fresh = result.fresh.filter(o => !regressed.some(r => r.issue.id === o.issue.id))
         seenIssueIds = result.seen
 
         if (fresh.length === 0 || !Plasmoid.configuration.notifyOnNew) {
@@ -130,6 +155,9 @@ PlasmoidItem {
         loaded = false
         projects = []
         seenIssueIds = null
+        changeSnapshot = null
+        regressedIds = ({})
+        activity = ({})
         errorText = ""
         refresh()
     }
@@ -180,6 +208,13 @@ PlasmoidItem {
         iconName: "tools-report-bug"
     }
 
+    Notification {
+        id: regressedNotification
+        componentName: "plasma_workspace"
+        eventId: "notification"
+        iconName: "tools-report-bug"
+    }
+
     Timer {
         interval: Plasmoid.configuration.pollInterval * 60 * 1000
         running: root.serverUrl !== ""
@@ -222,7 +257,7 @@ PlasmoidItem {
         if (!loaded) return i18n("Loading…")
         if (totalIssues === 0) return i18n("No issues")
         return visibleStates.map(st => i18n("%1 %2", stateCounts[st.key], st.label.toLowerCase())).join(" · ")
-            + (truncated ? "\n" + i18n("Counts cover the most recently seen issues per project.") : "")
+            + (truncated ? "\n" + i18n("Muted and resolved counts cover only the most recently seen issues read per project, so they may be too low.") : "")
     }
 
     switchWidth: Kirigami.Units.gridUnit * 14
@@ -433,6 +468,8 @@ PlasmoidItem {
         property var issue
         readonly property bool busy: root.busyIds[issue.id] === true
         readonly property bool fresh: root.isNew(issue)
+        readonly property bool regressed: root.regressedIds[issue.id] === true
+        readonly property int newEvents: root.activity[issue.id] || 0
 
         Layout.fillWidth: true
         onClicked: Qt.openUrlExternally(root.issueUrl(issue))
@@ -455,16 +492,19 @@ PlasmoidItem {
                 PlasmaComponents.Label {
                     textFormat: Text.PlainText
                     Layout.fillWidth: true
-                    text: root.issueTitle(row.issue)
-                    font.bold: row.fresh
+                    text: (row.regressed ? i18n("[regressed] ") : "") + root.issueTitle(row.issue)
+                    font.bold: row.fresh || row.regressed
                     elide: Text.ElideRight
                 }
                 PlasmaComponents.Label {
                     textFormat: Text.PlainText
                     Layout.fillWidth: true
-                    text: [row.issue.transaction,
+                    text: [row.issue.friendly_id,
+                           row.issue.transaction,
                            i18np("%1 event", "%1 events", row.issue.digested_event_count || 0),
-                           i18n("last seen %1", root.relativeTime(row.issue.last_seen))].filter(t => t).join(" · ")
+                           row.newEvents > 0 ? i18n("+%1 new", row.newEvents) : "",
+                           row.fresh ? i18n("first seen %1", root.relativeTime(row.issue.first_seen))
+                                     : i18n("last seen %1", root.relativeTime(row.issue.last_seen))].filter(t => t).join(" · ")
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
                     elide: Text.ElideRight
@@ -656,7 +696,7 @@ PlasmoidItem {
                             text: i18n("%1 (%2 open)", group.modelData.name, group.modelData.open.length)
                         }
                         Repeater {
-                            model: projectHeader.collapsed ? [] : group.modelData.open
+                            model: projectHeader.collapsed ? [] : Logic.ordered(group.modelData.open, root.regressedIds, root.activity)
                             IssueRow {
                                 required property var modelData
                                 issue: modelData

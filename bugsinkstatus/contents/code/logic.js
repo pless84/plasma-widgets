@@ -63,6 +63,42 @@ function freshIssues(projects, seenIds) {
     return { fresh: fresh, seen: seen }
 }
 
+// What changed since the previous poll. prev is the snapshot this returned last time (null on
+// the first check, when nothing counts as changed). Returns
+//   regressed: [{issue, project}], open now but resolved on the previous poll,
+//   activity:  {id: n}, issues that gained n > 0 events (digested_event_count) since then,
+//   snapshot:  to pass as prev next time. Its .regressed holds the ids flagged as regressed,
+//              kept while the issue stays open, for tagging rows.
+// Regressions are only seen within the pages read per project: an issue resolved so long ago
+// that it fell off the last page can't be noticed when it reopens.
+function changes(projects, prev) {
+    const regressed = [], activity = {}
+    const snapshot = { resolved: {}, events: {}, regressed: {} }
+    projects.forEach(p => {
+        (p.resolved_ids || []).forEach(id => snapshot.resolved[id] = true)
+        p.open.forEach(i => {
+            snapshot.events[i.id] = i.digested_event_count
+            if (!prev) return
+            if (prev.regressed[i.id]) snapshot.regressed[i.id] = true
+            if (prev.resolved[i.id]) {
+                regressed.push({ issue: i, project: p.name })
+                snapshot.regressed[i.id] = true
+            }
+            const before = prev.events[i.id]
+            if (typeof before === "number" && i.digested_event_count > before) {
+                activity[i.id] = i.digested_event_count - before
+            }
+        })
+    })
+    return { regressed: regressed, activity: activity, snapshot: snapshot }
+}
+
+// Issues with regressed ones first, then those with new events, then the rest in the order given.
+function ordered(issues, regressedIds, activity) {
+    const rank = i => regressedIds[i.id] ? 0 : activity[i.id] ? 1 : 2
+    return issues.map((i, n) => ({ i: i, n: n })).sort((a, b) => rank(a.i) - rank(b.i) || a.n - b.n).map(x => x.i)
+}
+
 // The badge states to show: those switched on in the settings (st.inPanel) with issues in
 // them, or all switched-on ones when showZero is set.
 function panelStates(states, counts, showZero) {

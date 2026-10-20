@@ -10,10 +10,10 @@ API = "/api/canonical/0"
 @pytest.fixture
 def bugsink(server, stubs):
     secret_tool(stubs, "plasma-bugsink", server.url, "tok")
-    server.add(f"GET {API}/projects/", {"results": [{"id": 1, "name": "Shop"}, {"id": 2, "name": "Quiet"}], "next": None})
+    server.add(f"GET {API}/projects/", {"results": [{"id": 1, "name": "Shop", "slug": "shop"}, {"id": 2, "name": "Quiet"}], "next": None})
     issue = lambda iid, **kw: {"id": iid, "calculated_type": "KeyError", "calculated_value": "'x'", "transaction": "/t",
                                "first_seen": "2026-10-01T00:00:00Z", "last_seen": "2026-10-09T00:00:00Z",
-                               "digested_event_count": 3, "stacktrace": "secret internals", **kw}
+                               "digested_event_count": 3, "digest_order": {"o1": 1, "o2": 2}.get(iid, 9), "stacktrace": "secret internals", **kw}
     server.add(f"GET {API}/issues/?project=1&sort=last_seen&order=desc",
                {"results": [issue("o1"), issue("m1", is_muted=True), issue("r1", is_resolved=True),
                             issue("rm", is_resolved=True, is_muted=True)],
@@ -29,8 +29,10 @@ def test_fetch(bugsink, run):
     shop, quiet = json.loads(result.stdout)["projects"]
     assert [i["id"] for i in shop["open"]] == ["o1", "o2"]
     assert (shop["muted"], shop["resolved"], shop["truncated"]) == (1, 2, False)   # resolved+muted counts as resolved
+    assert shop["resolved_ids"] == ["r1", "rm"]
+    assert [i["friendly_id"] for i in shop["open"]] == ["SHOP-1", "SHOP-2"]       # slug + digest_order
     assert "stacktrace" not in shop["open"][0]                                     # only the fields the widget shows
-    assert quiet == {"id": 2, "name": "Quiet", "open": [], "muted": 0, "resolved": 0, "truncated": False}
+    assert quiet == {"id": 2, "name": "Quiet", "open": [], "muted": 0, "resolved": 0, "resolved_ids": [], "truncated": False}
     assert {r["headers"]["authorization"] for r in bugsink.requests} == {"Bearer tok"}
 
 
@@ -74,3 +76,13 @@ def test_unreachable(stubs, run):
 
 def test_usage(run):
     assert run("bugsinkstatus", "bugsink.py").returncode == 2
+
+
+def test_friendly_id_from_api_or_omitted(server, stubs, run):
+    secret_tool(stubs, "plasma-bugsink", server.url, "tok")
+    server.add(f"GET {API}/projects/", {"results": [{"id": 1, "name": "NoSlug"}], "next": None})
+    server.add(f"GET {API}/issues/?project=1&sort=last_seen&order=desc",
+               {"results": [{"id": "a", "friendly_id": "X-7", "digest_order": 7}, {"id": "b", "digest_order": 8}],
+                "next": None})
+    result = run("bugsinkstatus", "bugsink.py", "fetch", server.url)
+    assert [i["friendly_id"] for i in json.loads(result.stdout)["projects"][0]["open"]] == ["X-7", None]

@@ -64,3 +64,42 @@ test("panelStates and visibleStates", () => {
     assert.deepEqual(L.panelStates(states, counts, false).map(s => s.key), ["open"])
     assert.deepEqual(L.panelStates(states, counts, true).map(s => s.key), ["new", "open"])
 })
+
+test("changes: regressions and activity since the previous poll", () => {
+    const poll1 = [{ name: "Shop", open: [issue("a", 60, 5, { digested_event_count: 3 })], resolved_ids: ["r1", "r2"] }]
+    const first = L.changes(poll1, null)
+    assert.deepEqual(first.regressed, [])               // never on the first check
+    assert.deepEqual(first.activity, {})
+
+    const poll2 = [{ name: "Shop", open: [issue("a", 60, 1, { digested_event_count: 15 }), issue("r1", 9999, 1, { digested_event_count: 7 })],
+                     resolved_ids: ["r2"] }]
+    const second = L.changes(poll2, first.snapshot)
+    assert.deepEqual(second.regressed.map(o => [o.issue.id, o.project]), [["r1", "Shop"]])
+    assert.deepEqual(second.activity, { a: 12 })          // r1 had no earlier count, so no "+n"
+    assert.deepEqual(Object.keys(second.snapshot.regressed), ["r1"])
+
+    // Stays flagged while open, drops once it is no longer open; same count means no activity.
+    const third = L.changes(poll2, second.snapshot)
+    assert.deepEqual(third.regressed, [])
+    assert.deepEqual(third.activity, {})
+    assert.deepEqual(Object.keys(third.snapshot.regressed), ["r1"])
+    assert.deepEqual(Object.keys(L.changes([{ name: "Shop", open: [], resolved_ids: [] }], third.snapshot).snapshot.regressed), [])
+})
+
+test("ordered: regressed, then active, then the rest in the given order", () => {
+    const issues = ["a", "b", "c", "d"].map(id => ({ id }))
+    assert.deepEqual(L.ordered(issues, { d: true }, { c: 2 }).map(i => i.id), ["d", "c", "a", "b"])
+    assert.deepEqual(L.ordered(issues, {}, {}).map(i => i.id), ["a", "b", "c", "d"])
+})
+
+test("main.qml: regressions use their own Notification and setting, not the new-issue popup", async () => {
+    const { readFileSync } = await import("node:fs")
+    const qml = readFileSync(new URL("../../bugsinkstatus/contents/ui/main.qml", import.meta.url), "utf8")
+    const fn = qml.slice(qml.indexOf("function notifyAboutRegressed"), qml.indexOf("function notifyAboutNew"))
+    assert.match(fn, /regressedNotification\.sendEvent/)
+    assert.doesNotMatch(fn, /newIssueNotification/)
+    assert.match(fn, /notifyOnRegression/)
+    assert.match(qml, /id: regressedNotification/)
+    const xml = readFileSync(new URL("../../bugsinkstatus/contents/config/main.xml", import.meta.url), "utf8")
+    assert.match(xml, /name="notifyOnRegression"[^>]*>\s*<label>[^<]*<\/label>\s*<default>true</)
+})

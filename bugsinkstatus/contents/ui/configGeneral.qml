@@ -18,6 +18,7 @@ KCM.SimpleKCM {
     property alias cfg_showZeroInPanel: showZeroInPanel.checked
     property alias cfg_showTotalInPanel: showTotalInPanel.checked
     property alias cfg_notifyOnNew: notifyOnNew.checked
+    property alias cfg_notifyOnRegression: notifyOnRegression.checked
 
     readonly property string normalizedUrl: serverUrl.text.trim().replace(/\/+$/, "")
 
@@ -216,6 +217,10 @@ KCM.SimpleKCM {
             id: notifyOnNew
             Kirigami.FormData.label: i18n("Notifications:")
             text: i18n("Notify when a new issue appears")
+        }
+        QQC2.CheckBox {
+            id: notifyOnRegression
+            text: i18n("Notify when a resolved issue comes back")
         }
     }
 }
