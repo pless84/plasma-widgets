@@ -15,9 +15,9 @@ test("isNew: first seen within 24 hours", () => {
 
 test("countStates: open is unresolved minus new", () => {
     assert.deepEqual(L.countStates({ new: 2, unresolved: 7, archived: 3, resolved: 40 }),
-        { new: 2, open: 5, archived: 3, resolved: 40 })
-    assert.deepEqual(L.countStates({ new: 3, unresolved: 2 }), { new: 3, open: 0, archived: 0, resolved: 0 })
-    assert.deepEqual(L.countStates(undefined), { new: 0, open: 0, archived: 0, resolved: 0 })
+        { new: 2, open: 5, archived: 3, resolved: 40, regressed: 0 })
+    assert.deepEqual(L.countStates({ new: 3, unresolved: 2 }), { new: 3, open: 0, archived: 0, resolved: 0, regressed: 0 })
+    assert.deepEqual(L.countStates(undefined), { new: 0, open: 0, archived: 0, resolved: 0, regressed: 0 })
 })
 
 test("groupByProject: most recently active project first, issue order kept", () => {
@@ -59,4 +59,53 @@ test("panelStates and visibleStates", () => {
     assert.deepEqual(L.visibleStates(states, counts).map(s => s.key), ["open", "resolved"])
     assert.deepEqual(L.panelStates(states, counts, false).map(s => s.key), ["open"])
     assert.deepEqual(L.panelStates(states, counts, true).map(s => s.key), ["new", "open", "archived"])
+})
+
+test("countStates: regressed is passed through and not part of open", () => {
+    assert.deepEqual(L.countStates({ new: 1, unresolved: 4, regressed: 2 }),
+        { new: 1, open: 3, archived: 0, resolved: 0, regressed: 2 })
+})
+
+test("regressedIssues: seen before, now regressed, wasn't regressed last time", () => {
+    const seen = { a: true, b: true, c: true, d: true }
+    const prev = { a: "ongoing", b: "regressed" }
+    const list = [issue("a", "p", 60, 1, { substatus: "regressed" }), issue("b", "p", 60, 1, { substatus: "regressed" }),
+        issue("c", "p", 60, 1, { substatus: "regressed" }),     // absent from the last list: came back
+        issue("d", "p", 60, 1, { substatus: "ongoing" }), issue("e", "p", 1, 1, { substatus: "regressed" }),   // e is new, not seen
+        issue("f", "p", 60, 1)]
+    assert.deepEqual(L.regressedIssues(list, seen, prev).map(i => i.id), ["a", "c"])
+    assert.deepEqual(L.regressedIssues(list, null, null), [])
+    assert.deepEqual(L.regressedIssues(list, seen, null), [])
+    assert.deepEqual(L.substatusById([{ id: "a", substatus: "new" }, { id: "b" }]), { a: "new", b: "" })
+})
+
+test("substatusById is cumulative: a regressed issue that rotates out and back is not reported again", () => {
+    const regressed = issue("a", "p", 60, 1, { substatus: "regressed" })
+    let prev = L.substatusById([regressed], null)
+    assert.deepEqual(L.regressedIssues([regressed], { a: true }, null), [])
+    const gone = L.substatusById([issue("b", "p", 60, 1, { substatus: "ongoing" })], prev)    // a dropped off the pages
+    assert.deepEqual(gone, { a: "regressed", b: "ongoing" })
+    assert.deepEqual(L.regressedIssues([regressed], { a: true }, gone), [])
+    // seen again with another substatus: the entry is replaced, so a later regression is reported
+    const back = L.substatusById([issue("a", "p", 60, 1, { substatus: "ongoing" })], gone)
+    assert.equal(back.a, "ongoing")
+    assert.deepEqual(L.regressedIssues([regressed], { a: true }, back).map(i => i.id), ["a"])
+})
+
+test("severityState: level, lifted by high priority, tolerating no level or priority", () => {
+    assert.equal(L.severityState({ level: "fatal" }), "new")
+    assert.equal(L.severityState({ level: "error" }), "new")
+    assert.equal(L.severityState({ level: "warning" }), "open")
+    assert.equal(L.severityState({ level: "warning", priority: "high" }), "new")
+    assert.equal(L.severityState({ level: "info" }), "archived")
+    assert.equal(L.severityState({}), "open")
+})
+
+test("issueTags and events24h", () => {
+    assert.deepEqual(L.issueTags({ level: "fatal", substatus: "regressed", isUnhandled: true }), ["fatal", "regressed", "unhandled"])
+    assert.deepEqual(L.issueTags({ level: "error", substatus: "escalating" }), ["escalating"])
+    assert.deepEqual(L.issueTags({ substatus: "ongoing", isUnhandled: false }), [])
+    assert.equal(L.events24h({ events24h: 0 }), 0)
+    assert.equal(L.events24h({ events24h: null }), null)
+    assert.equal(L.events24h({}), null)
 })

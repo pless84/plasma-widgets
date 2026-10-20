@@ -24,6 +24,18 @@
       <min>1</min>
       <max>20</max>
     </entry>
+    <entry name="environment" type="String">
+      <label>Only count and list events from this environment, e.g. production; empty means all</label>
+      <default></default>
+    </entry>
+    <entry name="levelErrorsOnly" type="Bool">
+      <label>Count only issues of level error or fatal in the badges and the list</label>
+      <default>false</default>
+    </entry>
+    <entry name="categoryErrorsOnly" type="Bool">
+      <label>Count only error issues (not performance or other issue categories)</label>
+      <default>false</default>
+    </entry>
     <entry name="showNewInPanel" type="Bool">
       <label>Show the new (first seen in the last 24 hours) badge</label>
       <default>true</default>
@@ -40,6 +52,10 @@
       <label>Show the resolved badge</label>
       <default>false</default>
     </entry>
+    <entry name="showRegressedInPanel" type="Bool">
+      <label>Show a badge for unresolved issues that regressed (these are also counted as open)</label>
+      <default>false</default>
+    </entry>
     <entry name="showZeroInPanel" type="Bool">
       <label>Show badges for states with no issues</label>
       <default>false</default>
@@ -50,6 +66,10 @@
     </entry>
     <entry name="notifyOnNew" type="Bool">
       <label>Send a desktop notification for new issues</label>
+      <default>true</default>
+    </entry>
+    <entry name="notifyOnRegression" type="Bool">
+      <label>Send a desktop notification when a resolved issue regresses</label>
       <default>true</default>
     </entry>
     <entry name="collapsedGroups" type="StringList">
@@ -97,6 +117,10 @@
     <entry name="colorResolved" type="Color">
       <label>Resolved badge colour</label>
       <default>#2ba185</default>
+    </entry>
+    <entry name="colorRegressed" type="Color">
+      <label>Regressed badge colour</label>
+      <default>#e5534b</default>
     </entry>
     <entry name="colorCountBackground" type="Color">
       <label>Count background badge colour</label>

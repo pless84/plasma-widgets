@@ -18,6 +18,15 @@ PlasmoidItem {
     readonly property string scriptPath: Qt.resolvedUrl("../code/sentry.py").toString().replace("file://", "")
     readonly property string serverUrl: Plasmoid.configuration.serverUrl.trim().replace(/\/+$/, "")
     readonly property string organization: Plasmoid.configuration.organization.trim()
+    // sentry.py's filter options from the settings; changing them starts over, as their counts differ.
+    readonly property string filterOptions: {
+        const environment = Plasmoid.configuration.environment.trim()
+        return (Plasmoid.configuration.levelErrorsOnly ? " --errors-only" : "")
+            + (Plasmoid.configuration.categoryErrorsOnly ? " --category-errors" : "")
+            + (environment !== "" ? " --environment " + Logic.shellQuote(environment) : "")
+    }
+    // The regressed count only adds to the counts, so switching it does not start over.
+    readonly property string fetchOptions: filterOptions + (Plasmoid.configuration.showRegressedInPanel ? " --regressed" : "")
     readonly property bool configured: serverUrl !== "" && organization !== ""
     readonly property string issuesPageUrl: Logic.issuesPageUrl(serverUrl, organization)
 
@@ -28,6 +37,8 @@ PlasmoidItem {
     property bool truncated: false
     // Ids of issues already seen, to notify only about new ones; null until the first check.
     property var seenIssueIds: null
+    // Each listed issue's substatus at the last check, to notice regressions; null until the first check.
+    property var lastSubstatus: null
     // Ids of issues with a resolve/archive in progress.
     property var busyIds: ({})
     property bool loaded: false
@@ -46,6 +57,8 @@ PlasmoidItem {
           inPanel: Plasmoid.configuration.showArchivedInPanel },
         { key: "resolved", label: i18n("Resolved"), glyph: "check", roundGlyph: "check", color: root.look.colors.colorResolved,
           inPanel: Plasmoid.configuration.showResolvedInPanel },
+        { key: "regressed", label: i18n("Regressed"), glyph: "restart", roundGlyph: "restart", color: root.look.colors.colorRegressed,
+          inPanel: Plasmoid.configuration.showRegressedInPanel },
     ]
 
     // An unresolved issue counts as new when it was first seen within the last 24 hours.
@@ -77,7 +90,8 @@ PlasmoidItem {
             return
         }
         fetcher.connectSource("python3 -I " + Logic.shellQuote(scriptPath) + " fetch " + Logic.shellQuote(serverUrl)
-            + " " + Logic.shellQuote(organization) + " " + Plasmoid.configuration.maxPages)
+            + " " + Logic.shellQuote(organization) + " " + Plasmoid.configuration.maxPages
+            + fetchOptions)
     }
 
     function runAction(issue, action) {
@@ -91,6 +105,21 @@ PlasmoidItem {
 
     function issueUrl(issue) {
         return Logic.issueUrl(serverUrl, organization, issue)
+    }
+
+    // The colour and label of a row tag from Logic.issueTags.
+    function tagColor(tag) {
+        return tag === "unhandled" ? root.look.colors.colorOpen
+            : tag === "regressed" ? root.look.colors.colorRegressed : root.look.colors.colorNew
+    }
+
+    function tagLabel(tag) {
+        switch (tag) {
+        case "fatal": return i18n("fatal")
+        case "regressed": return i18n("regressed")
+        case "escalating": return i18n("escalating")
+        default: return i18n("unhandled")
+        }
     }
 
     function issueTitle(issue) {
@@ -115,9 +144,22 @@ PlasmoidItem {
     }
 
     function notifyAboutNew() {
+        const regressed = Logic.regressedIssues(issues, seenIssueIds, lastSubstatus)
+        lastSubstatus = Logic.substatusById(issues, lastSubstatus)
         const result = Logic.freshIssues(issues, seenIssueIds)
         const fresh = result.fresh
         seenIssueIds = result.seen
+
+        if (regressed.length > 0 && Plasmoid.configuration.notifyOnRegression) {
+            if (regressed.length === 1) {
+                regressedNotification.title = i18n("Sentry: issue regressed in %1", regressed[0].project)
+                regressedNotification.text = issueTitle(regressed[0])
+            } else {
+                regressedNotification.title = i18np("Sentry: %1 issue regressed", "Sentry: %1 issues regressed", regressed.length)
+                regressedNotification.text = regressed.slice(0, 4).map(i => i.project + " – " + issueTitle(i)).join("\n")
+            }
+            regressedNotification.sendEvent()
+        }
 
         if (fresh.length === 0 || !Plasmoid.configuration.notifyOnNew) {
             return
@@ -134,6 +176,8 @@ PlasmoidItem {
 
     onServerUrlChanged: reset()
     onOrganizationChanged: reset()
+    onFilterOptionsChanged: reset()
+    onFetchOptionsChanged: refresh()
 
     function reset() {
         loaded = false
@@ -141,6 +185,7 @@ PlasmoidItem {
         counts = ({})
         truncated = false
         seenIssueIds = null
+        lastSubstatus = null
         errorText = ""
         refresh()
     }
@@ -186,6 +231,13 @@ PlasmoidItem {
 
     Notification {
         id: newIssueNotification
+        componentName: "plasma_workspace"
+        eventId: "notification"
+        iconName: "script-error"
+    }
+
+    Notification {
+        id: regressedNotification
         componentName: "plasma_workspace"
         eventId: "notification"
         iconName: "script-error"
@@ -458,25 +510,49 @@ PlasmoidItem {
                 Layout.alignment: Qt.AlignTop
                 Layout.topMargin: Kirigami.Units.smallSpacing
                 radius: width / 2
-                color: root.stateOf(row.fresh ? "new" : "open").color
+                color: root.stateOf(Logic.severityState(row.issue)).color
             }
 
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 0
-                PlasmaComponents.Label {
-                    textFormat: Text.PlainText
+                RowLayout {
                     Layout.fillWidth: true
-                    text: root.issueTitle(row.issue)
-                    font.bold: row.fresh
-                    elide: Text.ElideRight
+                    spacing: Kirigami.Units.smallSpacing
+                    PlasmaComponents.Label {
+                        textFormat: Text.PlainText
+                        Layout.fillWidth: true
+                        text: root.issueTitle(row.issue)
+                        font.bold: row.fresh
+                        elide: Text.ElideRight
+                    }
+                    Repeater {
+                        model: Logic.issueTags(row.issue)
+                        Rectangle {
+                            required property string modelData
+                            readonly property color tagColor: root.tagColor(modelData)
+                            implicitWidth: tagLabel.implicitWidth + Kirigami.Units.smallSpacing * 2
+                            implicitHeight: tagLabel.implicitHeight
+                            radius: 2
+                            color: tagColor
+                            PlasmaComponents.Label {
+                                id: tagLabel
+                                anchors.centerIn: parent
+                                text: root.tagLabel(parent.modelData)
+                                font: Kirigami.Theme.smallFont
+                                color: root.contrastText(parent.tagColor)
+                            }
+                        }
+                    }
                 }
                 PlasmaComponents.Label {
                     textFormat: Text.PlainText
                     Layout.fillWidth: true
                     text: [row.issue.shortId, row.issue.culprit,
-                           i18np("%1 event", "%1 events", parseInt(row.issue.count) || 0),
+                           i18np("%1 event in 90 days", "%1 events in 90 days", parseInt(row.issue.count) || 0),
+                           Logic.events24h(row.issue) !== null ? i18n("%1 in 24h", Logic.events24h(row.issue)) : "",
                            row.issue.userCount ? i18np("%1 user", "%1 users", row.issue.userCount) : "",
+                           row.issue.assignee ? "→ " + row.issue.assignee : "",
                            i18n("last seen %1", root.relativeTime(row.issue.lastSeen))].filter(t => t).join(" · ")
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont

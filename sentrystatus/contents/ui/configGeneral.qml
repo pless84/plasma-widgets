@@ -12,6 +12,11 @@ KCM.SimpleKCM {
     property alias cfg_organization: organization.text
     property alias cfg_pollInterval: pollInterval.value
     property alias cfg_maxPages: maxPages.value
+    property alias cfg_environment: environment.text
+    property alias cfg_levelErrorsOnly: levelErrorsOnly.checked
+    property alias cfg_categoryErrorsOnly: categoryErrorsOnly.checked
+    property alias cfg_showRegressedInPanel: showRegressedInPanel.checked
+    property alias cfg_notifyOnRegression: notifyOnRegression.checked
     property alias cfg_showNewInPanel: showNewInPanel.checked
     property alias cfg_showOpenInPanel: showOpenInPanel.checked
     property alias cfg_showArchivedInPanel: showArchivedInPanel.checked
@@ -194,6 +199,29 @@ KCM.SimpleKCM {
             text: i18n("Unresolved issues are listed most recently seen first. The badge counts come from Sentry and cover every issue seen in the last 90 days, whatever this limit.")
         }
 
+        QQC2.TextField {
+            id: environment
+            Kirigami.FormData.label: i18n("Environment:")
+            Layout.fillWidth: true
+            placeholderText: i18n("all environments, or e.g. production")
+        }
+        QQC2.CheckBox {
+            id: levelErrorsOnly
+            Kirigami.FormData.label: i18n("Count only:")
+            text: i18n("Errors and fatals (not warnings or info)")
+        }
+        QQC2.CheckBox {
+            id: categoryErrorsOnly
+            text: i18n("Error issues (not performance or other categories)")
+        }
+        QQC2.Label {
+            Layout.fillWidth: true
+            wrapMode: Text.WordWrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: i18n("These filters apply to the list and to every badge. They are off by default so the counts match what Sentry's own issue list shows.")
+        }
+
         QQC2.CheckBox {
             id: showNewInPanel
             Kirigami.FormData.label: i18n("Show badges:")
@@ -211,6 +239,10 @@ KCM.SimpleKCM {
             id: showResolvedInPanel
             text: i18n("Resolved")
         }
+        QQC2.CheckBox {
+            id: showRegressedInPanel
+            text: i18n("Regressed (already counted as open)")
+        }
         QQC2.Switch {
             id: showZeroInPanel
             text: i18n("Also show states with no issues")
@@ -224,6 +256,10 @@ KCM.SimpleKCM {
             id: notifyOnNew
             Kirigami.FormData.label: i18n("Notifications:")
             text: i18n("Notify when a new issue appears")
+        }
+        QQC2.CheckBox {
+            id: notifyOnRegression
+            text: i18n("Notify when a resolved issue regresses")
         }
     }
 }

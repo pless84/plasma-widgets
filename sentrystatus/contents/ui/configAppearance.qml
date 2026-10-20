@@ -139,6 +139,8 @@ KCM.SimpleKCM {
     property color cfg_colorArchivedDefault
     property color cfg_colorResolved
     property color cfg_colorResolvedDefault
+    property color cfg_colorRegressed
+    property color cfg_colorRegressedDefault
     property color cfg_colorCountBackground
     property color cfg_colorCountBackgroundDefault
 
@@ -148,6 +150,7 @@ KCM.SimpleKCM {
         { key: "colorOpen", label: i18n("Open:") },
         { key: "colorArchived", label: i18n("Archived:") },
         { key: "colorResolved", label: i18n("Resolved:") },
+        { key: "colorRegressed", label: i18n("Regressed:") },
         { key: "colorCountBackground", label: i18n("Count background:") }
     ]
 
