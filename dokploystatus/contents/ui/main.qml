@@ -547,6 +547,8 @@ PlasmoidItem {
 
             ColumnLayout {
                 Layout.fillWidth: true
+                // Only the width left beside the buttons, so long lines elide instead of running under them.
+                Layout.preferredWidth: 1
                 spacing: 0
                 PlasmaComponents.Label {
                     textFormat: Text.PlainText

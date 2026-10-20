@@ -92,7 +92,8 @@ function deploymentSummary(service, now) {
     return {
         minutes: minutesSince(d.finishedAt || d.startedAt || d.createdAt, now),
         duration: isNaN(started) || isNaN(finished) ? null : Math.max(0, (finished - started) / 1000),
-        title: (d.title || "").trim(),
+        // A git deployment's title is the whole commit message; its first line is the summary.
+        title: (d.title || "").trim().split("\n")[0].trim(),
         commit: shortCommit(d.description),
         failed: d.status === "error",
     }
