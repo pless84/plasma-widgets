@@ -103,6 +103,19 @@ def test_docker_action_refuses_bad_use(docker, run, args):
     assert docker.calls("docker") == []
 
 
+@pytest.mark.parametrize("context", ["", "colima"])
+@pytest.mark.parametrize("args", [
+    ["down"], ["down", "a1"], ["down", "--project"], ["down", "--project", ""],
+    ["stop", "--project"], ["stop", "--project", ""],
+])
+def test_docker_stack_action_needs_a_project(docker, run, context, args):
+    # Removing a stack must name its project: without one compose would guess from the
+    # current directory, so these are refused before docker runs.
+    result = run("dockerstatus", "action.sh", context, *args)
+    assert result.returncode == 2 and "needs --project <compose-project>" in result.stderr
+    assert docker.calls("docker") == []
+
+
 def test_docker_images(docker, run):
     assert run("dockerstatus", "images.sh", "").stdout == '{"ID":"a1"}\n'
     assert docker.calls("docker")[-1]["args"] == ["image", "ls", "--no-trunc", "--format", "{{json .}}"]

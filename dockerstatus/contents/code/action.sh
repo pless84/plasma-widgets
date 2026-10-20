@@ -9,6 +9,10 @@
 context=$1
 case "$2:$3" in
     start:--project|stop:--project|restart:--project|down:--project)
+        # An empty name would let compose pick a project from the current directory.
+        if [ -z "$4" ]; then
+            echo "$2 needs --project <compose-project>" >&2; exit 2
+        fi
         set -- compose --project-name "$4" "$2" ;;
     start:*|stop:*|restart:*)
         set -- "$2" "$3" ;;
