@@ -12,7 +12,7 @@
         "Id": "dk.madebypless.prtgstatus",
         "License": "GPL-2.0-or-later",
         "Name": "PRTG Status",
-        "Version": "1.14",
+        "Version": "1.15",
         "Website": "https://github.com/pless84/plasma-widgets",
         "BugReportUrl": "https://github.com/pless84/plasma-widgets/issues"
     },

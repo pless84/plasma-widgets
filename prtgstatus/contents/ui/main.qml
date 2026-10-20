@@ -176,7 +176,7 @@ PlasmoidItem {
         onTriggered: root.refresh()
     }
 
-    Plasmoid.icon: "network-server"
+    Plasmoid.icon: Qt.resolvedUrl("../images/logo.svg")
     Plasmoid.status: down.length > 0 ? PlasmaCore.Types.NeedsAttentionStatus : PlasmaCore.Types.ActiveStatus
 
     toolTipMainText: i18n("PRTG Status")

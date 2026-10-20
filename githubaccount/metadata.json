@@ -12,7 +12,7 @@
         "Id": "dk.madebypless.githubaccount",
         "License": "GPL-2.0-or-later",
         "Name": "GitHub Account",
-        "Version": "1.11",
+        "Version": "1.12",
         "Website": "https://github.com/pless84/plasma-widgets",
         "BugReportUrl": "https://github.com/pless84/plasma-widgets/issues"
     },

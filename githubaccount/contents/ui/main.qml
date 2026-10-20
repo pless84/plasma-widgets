@@ -169,7 +169,8 @@ PlasmoidItem {
         }
     }
 
-    Plasmoid.icon: "vcs-branch"
+    // The logo is white, so light themes get a dark copy.
+    Plasmoid.icon: Qt.resolvedUrl(Kirigami.ColorUtils.brightnessForColor(Kirigami.Theme.textColor) === Kirigami.ColorUtils.Light ? "../images/logo.svg" : "../images/logo-dark.svg")
     Plasmoid.status: ciFailing > 0 || reviewCount > 0
         ? PlasmaCore.Types.NeedsAttentionStatus
         : PlasmaCore.Types.ActiveStatus

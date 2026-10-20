@@ -187,7 +187,7 @@ PlasmoidItem {
         onTriggered: root.refresh()
     }
 
-    Plasmoid.icon: "tools-report-bug"
+    Plasmoid.icon: Qt.resolvedUrl("../images/logo.png")
     Plasmoid.status: stateCounts.new > 0 ? PlasmaCore.Types.NeedsAttentionStatus : PlasmaCore.Types.ActiveStatus
 
     toolTipMainText: i18n("Bugsink")

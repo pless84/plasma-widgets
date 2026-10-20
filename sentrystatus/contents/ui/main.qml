@@ -198,7 +198,8 @@ PlasmoidItem {
         onTriggered: root.refresh()
     }
 
-    Plasmoid.icon: "script-error"
+    // The logo is white, so light themes get a dark copy.
+    Plasmoid.icon: Qt.resolvedUrl(Kirigami.ColorUtils.brightnessForColor(Kirigami.Theme.textColor) === Kirigami.ColorUtils.Light ? "../images/logo.svg" : "../images/logo-dark.svg")
     Plasmoid.status: stateCounts.new > 0 ? PlasmaCore.Types.NeedsAttentionStatus : PlasmaCore.Types.ActiveStatus
 
     toolTipMainText: i18n("Sentry")

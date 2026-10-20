@@ -183,7 +183,7 @@ PlasmoidItem {
         onTriggered: root.refresh()
     }
 
-    Plasmoid.icon: "folder-docker"
+    Plasmoid.icon: Qt.resolvedUrl("../images/logo.svg")
     Plasmoid.status: problemCount > 0 ? PlasmaCore.Types.NeedsAttentionStatus : PlasmaCore.Types.ActiveStatus
 
     toolTipMainText: dockerContext ? i18n("Docker (%1)", dockerContext) : i18n("Docker")
@@ -559,7 +559,7 @@ PlasmoidItem {
             anchors.centerIn: parent
             width: parent.width - Kirigami.Units.gridUnit * 2
             visible: root.loaded && root.containers.length === 0
-            iconName: "folder-docker"
+            iconName: Plasmoid.icon
             text: i18n("No containers")
         }
 

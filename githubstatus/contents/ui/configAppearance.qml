@@ -17,7 +17,7 @@ KCM.SimpleKCM {
     property string cfg_logoIconDefault
 
     // The widget's own icon, used as the logo until another one is chosen.
-    readonly property string defaultLogo: "vcs-branch"
+    readonly property string defaultLogo: Qt.resolvedUrl(Kirigami.ColorUtils.brightnessForColor(Kirigami.Theme.textColor) === Kirigami.ColorUtils.Light ? "../images/logo.svg" : "../images/logo-dark.svg")
 
     property QtObject logoDialog: KIconThemes.IconDialog {
         title: i18n("Choose a Logo")

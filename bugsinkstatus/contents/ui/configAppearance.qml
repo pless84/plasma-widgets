@@ -17,7 +17,7 @@ KCM.SimpleKCM {
     property string cfg_logoIconDefault
 
     // The widget's own icon, used as the logo until another one is chosen.
-    readonly property string defaultLogo: "tools-report-bug"
+    readonly property string defaultLogo: Qt.resolvedUrl("../images/logo.png")
 
     property QtObject logoDialog: KIconThemes.IconDialog {
         title: i18n("Choose a Logo")
