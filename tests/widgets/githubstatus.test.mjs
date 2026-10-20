@@ -45,3 +45,60 @@ test("panelStates", () => {
     assert.deepEqual(L.panelStates(states, { operational: 11 }, false).map(s => s.key), ["operational"])
     assert.equal(L.panelStates(states, { operational: 11 }, true).length, 2)
 })
+
+const incident = (id, status, extra = {}) => ({
+    id, name: "Incident " + id, status, impact: "minor",
+    started_at: "2026-01-01T10:00:00Z",
+    components: [{ name: "Actions" }, { name: "Pages" }],
+    incident_updates: [{ id: "u-" + id + status, status, body: "We are looking.<br />Second &amp; line", display_at: "2026-01-01T10:05:00Z" }],
+    ...extra,
+})
+
+test("stripHtml and oneLine", () => {
+    assert.equal(L.stripHtml("a<br />b<br/>c <b>d</b> &amp; &lt;e&gt;"), "a\nb\nc d & <e>")
+    assert.equal(L.stripHtml(null), "")
+    assert.equal(L.oneLine("a\n b   c", 10), "a b c")
+    assert.equal(L.oneLine("abcdefghij", 5), "abcd…")
+})
+
+test("parseSummary adds affected components and the latest update to incidents", () => {
+    const parsed = L.parseSummary({ ...summary, incidents: [incident("i1", "investigating")] })
+    const i = parsed.incidents[0]
+    assert.deepEqual(i.affects, ["Actions", "Pages"])
+    assert.equal(i.started, "2026-01-01T10:00:00Z")
+    assert.equal(i.update.body, "We are looking.\nSecond & line")
+    assert.equal(i.update.at, "2026-01-01T10:05:00Z")
+    assert.deepEqual(L.parseSummary(summary).incidents[0].affects, [])
+    assert.equal(L.parseSummary(summary).incidents[0].update, null)
+})
+
+test("parseSummary keeps upcoming scheduled maintenance apart", () => {
+    const parsed = L.parseSummary(summary)
+    assert.deepEqual(parsed.upcoming.map(m => m.id), ["m2"])
+})
+
+test("incidentChanges: nothing on the first check", () => {
+    const r = L.incidentChanges(null, [incident("i1", "investigating")])
+    assert.deepEqual(r.events, [])
+    assert.deepEqual(r.next, { i1: { name: "Incident i1", status: "investigating" } })
+})
+
+test("incidentChanges: new, status step, resolved, unchanged", () => {
+    const first = L.incidentChanges(null, [L.parseSummary({ ...summary, incidents: [incident("i1", "investigating")] }).incidents[0]])
+    const open = ["i1", "investigating"]
+    const parse = list => L.parseSummary({ ...summary, incidents: list }).incidents
+    const same = L.incidentChanges(first.next, parse([incident(...open)]))
+    assert.deepEqual(same.events, [])
+    const step = L.incidentChanges(first.next, parse([incident("i1", "identified"), incident("i2", "investigating")]))
+    assert.deepEqual(step.events.map(e => [e.kind, e.incident.id]), [["status", "i1"], ["new", "i2"]])
+    const done = L.incidentChanges(step.next, [])
+    assert.deepEqual(done.events.map(e => [e.kind, e.incident.id, e.incident.name]), [["resolved", "i1", "Incident i1"], ["resolved", "i2", "Incident i2"]])
+    assert.deepEqual(done.next, {})
+})
+
+test("isToday compares the local calendar day", () => {
+    const now = new Date(2026, 9, 20, 15, 0)
+    assert.equal(L.isToday(new Date(2026, 9, 20, 1, 0).toISOString(), now), true)
+    assert.equal(L.isToday(new Date(2026, 9, 19, 23, 59).toISOString(), now), false)
+    assert.equal(L.isToday(new Date(2025, 9, 20, 15, 0).toISOString(), now), false)
+})

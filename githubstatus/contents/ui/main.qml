@@ -22,6 +22,9 @@ PlasmoidItem {
     property var components: []
     property var incidents: []
     property var maintenances: []
+    property var upcoming: []
+    // Open incidents as of the last check (see Logic.incidentChanges), null before the first one.
+    property var knownIncidents: null
     property date lastChecked
     property string errorText: ""
     property bool loading: false
@@ -48,6 +51,17 @@ PlasmoidItem {
     // settings, optionally including empty ones.
     readonly property var panelStates: Logic.panelStates(componentStates, stateCounts, Plasmoid.configuration.showZeroInPanel)
     readonly property bool badgeMode: root.look.badgeStyle !== "dot"
+    // An extra badge for an ongoing incident or maintenance, coloured by the indicator, so one that
+    // lists no components isn't hidden behind the component badges.
+    // A degraded component alone can make the indicator "minor" with no incident to count; then no badge.
+    readonly property bool indicatorActive: indicator !== "none" && indicator !== "unknown" && incidents.length + maintenances.length > 0
+    readonly property var indicatorState: ({
+        key: "indicator",
+        glyph: indicator === "critical" ? "cross" : indicator === "maintenance" ? "gear" : "exclamation",
+        roundGlyph: indicator === "critical" ? "cross" : indicator === "maintenance" ? "gear" : "exclamation",
+        color: root.indicatorColor(indicator),
+    })
+    readonly property int indicatorCount: incidents.length || maintenances.length
 
     // White or near-black, whichever reads better on the given background colour.
     function contrastText(background) {
@@ -82,8 +96,80 @@ PlasmoidItem {
         }
     }
 
+    function incidentStatusLabel(status) {
+        switch (status) {
+        case "investigating": return i18n("Investigating")
+        case "identified": return i18n("Identified")
+        case "monitoring": return i18n("Monitoring")
+        case "resolved": return i18n("Resolved")
+        case "postmortem": return i18n("Postmortem")
+        case "scheduled": return i18n("Scheduled")
+        case "in_progress": return i18n("In progress")
+        case "verifying": return i18n("Verifying")
+        case "completed": return i18n("Completed")
+        default: return status
+        }
+    }
+
     function formatTime(iso) {
         return new Date(iso).toLocaleString(Qt.locale(), Locale.ShortFormat)
+    }
+
+    function formatClock(iso) {
+        return new Date(iso).toLocaleTimeString(Qt.locale(), Locale.ShortFormat)
+    }
+
+    // "Actions, Pages", or "" when an incident lists no components.
+    function affectsText(event) {
+        return event.affects.length > 0 ? i18n("Affects: %1", event.affects.join(", ")) : ""
+    }
+
+    // The tooltip's second line on: the current incident, what it affects and since when.
+    function incidentTooltip() {
+        const event = incidents.length > 0 ? incidents[0] : (maintenances.length > 0 ? maintenances[0] : null)
+        if (!event) {
+            return ""
+        }
+        let text = event.name
+        if (event.affects.length > 0) {
+            text += "\n" + affectsText(event)
+        }
+        if (event.started) {
+            text += "\n" + i18n("Since %1", Logic.isToday(event.started) ? formatClock(event.started) : formatTime(event.started))
+        }
+        return text
+    }
+
+    // Title and text of one incident change.
+    function describeIncident(change) {
+        const incident = change.incident
+        const update = incident.update ? Logic.oneLine(incident.update.body, 200) : ""
+        let title
+        switch (change.kind) {
+        case "new":
+            title = i18n("GitHub incident: %1", incident.name)
+            break
+        case "resolved":
+            title = i18n("GitHub incident resolved: %1", incident.name)
+            break
+        default:
+            title = i18n("GitHub incident %1: %2", incidentStatusLabel(incident.status).toLowerCase(), incident.name)
+        }
+        return { title: title, text: update }
+    }
+
+    // One notification per check: a single change shows its own title and text, several are summarised
+    // (a notification can only show one event at a time, so sending one each would keep just the last).
+    function notifyIncidents(events) {
+        const described = events.map(describeIncident)
+        if (described.length === 1) {
+            incidentNotification.title = described[0].title
+            incidentNotification.text = described[0].text
+        } else {
+            incidentNotification.title = i18np("%1 GitHub incident change", "%1 GitHub incident changes", described.length)
+            incidentNotification.text = described.map(d => d.title).slice(0, 3).join("\n")
+        }
+        incidentNotification.sendEvent()
     }
 
     function refresh() {
@@ -118,8 +204,17 @@ PlasmoidItem {
         components = parsed.components
         incidents = parsed.incidents
         maintenances = parsed.maintenances
+        upcoming = parsed.upcoming
 
-        if (Logic.indicatorChanged(previous, indicator) && Plasmoid.configuration.notifyOnChange) {
+        const changes = Logic.incidentChanges(knownIncidents, incidents)
+        knownIncidents = changes.next
+        if (!Plasmoid.configuration.notifyOnChange) {
+            return
+        }
+        // Incident changes are notified one by one; the overall status only when nothing else says it.
+        if (changes.events.length > 0) {
+            notifyIncidents(changes.events)
+        } else if (Logic.indicatorChanged(previous, indicator)) {
             statusNotification.text = incidents.length > 0 ? incidents[0].name : summary
             statusNotification.title = i18n("GitHub: %1", summary)
             statusNotification.sendEvent()
@@ -157,7 +252,7 @@ PlasmoidItem {
         : PlasmaCore.Types.ActiveStatus
 
     toolTipMainText: i18n("GitHub Status")
-    toolTipSubText: errorText || summary
+    toolTipSubText: errorText || (incidentTooltip() ? summary + "\n" + incidentTooltip() : summary)
 
     switchWidth: Kirigami.Units.gridUnit * 12
     switchHeight: Kirigami.Units.gridUnit * 12
@@ -177,6 +272,13 @@ PlasmoidItem {
 
     Notification {
         id: statusNotification
+        componentName: "plasma_workspace"
+        eventId: "notification"
+        iconName: "vcs-branch"
+    }
+
+    Notification {
+        id: incidentNotification
         componentName: "plasma_workspace"
         eventId: "notification"
         iconName: "vcs-branch"
@@ -290,7 +392,8 @@ PlasmoidItem {
         property var badgeStates: root.visibleStates
         property bool showTotal: false
         property bool showLogo: false
-        readonly property int itemCount: badgeStates.length + (showTotal ? 1 : 0) + (showLogo ? 1 : 0)
+        property bool showIndicator: false
+        readonly property int itemCount: badgeStates.length + (showTotal ? 1 : 0) + (showLogo ? 1 : 0) + (showIndicator ? 1 : 0)
 
         flow: vertical ? GridLayout.TopToBottom : GridLayout.LeftToRight
         rows: vertical ? Math.max(itemCount, 1) : 1
@@ -319,6 +422,14 @@ PlasmoidItem {
             }
         }
 
+        // The incident badge, after the component badges.
+        StatusBadge {
+            visible: bar.showIndicator
+            componentState: root.indicatorState
+            count: root.indicatorCount
+            size: bar.badgeSize
+        }
+
         PlasmaComponents.Label {
             textFormat: Text.PlainText
             visible: bar.showTotal
@@ -334,7 +445,7 @@ PlasmoidItem {
         readonly property real badgeSize: Math.min(Kirigami.Units.iconSizes.smallMedium, vertical ? width : height)
         readonly property bool showTotal: Plasmoid.configuration.showTotalInPanel
         readonly property bool showBadges: root.badgeMode && root.components.length > 0
-            && (root.panelStates.length > 0 || showTotal)
+            && (root.panelStates.length > 0 || showTotal || root.indicatorActive)
 
         hoverEnabled: true
         acceptedButtons: Qt.LeftButton | Qt.MiddleButton
@@ -356,6 +467,7 @@ PlasmoidItem {
             badgeStates: root.panelStates
             showTotal: compact.showTotal
             showLogo: root.look.showLogo
+            showIndicator: root.indicatorActive
             vertical: compact.vertical
             badgeSize: compact.badgeSize
             opacity: root.errorText ? 0.5 : 1
@@ -409,6 +521,57 @@ PlasmoidItem {
         hoverEnabled: true
         onClicked: root.toggleCollapsed(groupKey)
         Accessible.name: collapsed ? i18n("Expand %1", text) : i18n("Collapse %1", text)
+    }
+
+    // An incident or maintenance in the popup: name, status, what it affects and its latest update
+    // (or, for scheduled maintenance, when it takes place). Click to open it on githubstatus.com.
+    component EventItem: PlasmaComponents.ItemDelegate {
+        required property var modelData
+        readonly property bool isScheduled: modelData.status === "scheduled"
+
+        Layout.fillWidth: true
+        onClicked: Qt.openUrlExternally(modelData.shortlink)
+        contentItem: ColumnLayout {
+            spacing: 0
+            PlasmaComponents.Label {
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                text: modelData.name
+                wrapMode: Text.WordWrap
+                font.bold: true
+                color: root.indicatorColor(modelData.impact === "none" ? "maintenance" : modelData.impact)
+            }
+            PlasmaComponents.Label {
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                text: isScheduled && modelData.scheduled_for && modelData.scheduled_until
+                    ? i18n("%1 · %2 to %3", root.incidentStatusLabel(modelData.status), root.formatTime(modelData.scheduled_for), root.formatTime(modelData.scheduled_until))
+                    : i18n("%1 · updated %2", root.incidentStatusLabel(modelData.status), root.formatTime(modelData.updated_at))
+                wrapMode: Text.WordWrap
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+            }
+            PlasmaComponents.Label {
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                visible: text !== ""
+                text: root.affectsText(modelData)
+                wrapMode: Text.WordWrap
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+            }
+            PlasmaComponents.Label {
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.smallSpacing
+                visible: !isScheduled && modelData.update !== null && modelData.update.body !== ""
+                text: modelData.update ? i18n("%1: %2", root.formatClock(modelData.update.at), modelData.update.body) : ""
+                wrapMode: Text.WordWrap
+                maximumLineCount: 5
+                elide: Text.ElideRight
+                font: Kirigami.Theme.smallFont
+            }
+        }
     }
 
     fullRepresentation: PlasmaExtras.Representation {
@@ -470,6 +633,7 @@ PlasmoidItem {
                 badgeSize: Kirigami.Units.iconSizes.small * 1.25
                 badgeStates: root.panelStates
                 showTotal: Plasmoid.configuration.showTotalInPanel
+                showIndicator: root.indicatorActive
             }
 
             PlasmaComponents.Label {
@@ -501,37 +665,37 @@ PlasmoidItem {
                 GroupHeader {
                     id: incidentHeader
                     groupKey: "incidents"
-                    visible: root.incidents.length + root.maintenances.length > 0
+                    visible: root.incidents.length > 0
                     text: i18n("Active incidents")
                 }
 
                 Repeater {
-                    id: incidentRepeater
-                    model: incidentHeader.collapsed ? [] : root.incidents.concat(root.maintenances)
+                    model: incidentHeader.collapsed ? [] : root.incidents
+                    EventItem {}
+                }
 
-                    PlasmaComponents.ItemDelegate {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        onClicked: Qt.openUrlExternally(modelData.shortlink)
-                        contentItem: ColumnLayout {
-                            spacing: 0
-                            PlasmaComponents.Label {
-                                textFormat: Text.PlainText
-                                Layout.fillWidth: true
-                                text: modelData.name
-                                wrapMode: Text.WordWrap
-                                font.bold: true
-                                color: root.indicatorColor(modelData.impact === "none" ? "maintenance" : modelData.impact)
-                            }
-                            PlasmaComponents.Label {
-                                textFormat: Text.PlainText
-                                Layout.fillWidth: true
-                                text: i18n("%1 · updated %2", modelData.status, root.formatTime(modelData.updated_at))
-                                opacity: 0.7
-                                font: Kirigami.Theme.smallFont
-                            }
-                        }
-                    }
+                GroupHeader {
+                    id: maintenanceHeader
+                    groupKey: "maintenance"
+                    visible: root.maintenances.length > 0
+                    text: i18n("Maintenance in progress")
+                }
+
+                Repeater {
+                    model: maintenanceHeader.collapsed ? [] : root.maintenances
+                    EventItem {}
+                }
+
+                GroupHeader {
+                    id: upcomingHeader
+                    groupKey: "upcoming"
+                    visible: root.upcoming.length > 0
+                    text: i18n("Scheduled maintenance")
+                }
+
+                Repeater {
+                    model: upcomingHeader.collapsed ? [] : root.upcoming
+                    EventItem {}
                 }
 
                 GroupHeader {
@@ -575,7 +739,7 @@ PlasmoidItem {
                 PlasmaExtras.PlaceholderMessage {
                     Layout.fillWidth: true
                     Layout.topMargin: Kirigami.Units.gridUnit * 2
-                    visible: !incidentHeader.visible && !componentHeader.visible
+                    visible: !incidentHeader.visible && !maintenanceHeader.visible && !upcomingHeader.visible && !componentHeader.visible
                     iconName: root.loading ? "view-refresh" : "checkmark"
                     text: root.loading ? i18n("Loading…") : i18n("All components operational")
                 }

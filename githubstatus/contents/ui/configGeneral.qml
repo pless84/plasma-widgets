@@ -26,7 +26,7 @@ KCM.SimpleKCM {
         }
         QQC2.CheckBox {
             id: notifyOnChange
-            text: i18n("Notify when the overall status changes")
+            text: i18n("Notify about new, updated and resolved incidents")
         }
         QQC2.CheckBox {
             id: showOperational

@@ -11,7 +11,7 @@
       <max>120</max>
     </entry>
     <entry name="notifyOnChange" type="Bool">
-      <label>Send a notification when the overall status changes</label>
+      <label>Send a notification when an incident starts, changes or is resolved, or the overall status changes</label>
       <default>true</default>
     </entry>
     <entry name="showOperational" type="Bool">
