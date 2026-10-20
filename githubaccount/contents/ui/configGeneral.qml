@@ -33,6 +33,10 @@ KCM.SimpleKCM {
     property alias cfg_pollInterval: pollInterval.value
     property alias cfg_notifyOnNew: notifyOnNew.checked
     property alias cfg_showRepos: showRepos.checked
+    property alias cfg_countTeamReviews: countTeamReviews.checked
+    property alias cfg_ciRepoDays: ciRepoDays.value
+    property alias cfg_notifyOnCi: notifyOnCi.checked
+    property alias cfg_showActionBadge: showActionBadge.checked
 
     Kirigami.FormLayout {
         QQC2.ComboBox {
@@ -65,6 +69,26 @@ KCM.SimpleKCM {
         QQC2.CheckBox {
             id: showRepos
             text: i18n("Show CI status of recently pushed repositories")
+        }
+        QQC2.SpinBox {
+            id: ciRepoDays
+            Kirigami.FormData.label: i18n("Repositories pushed within:")
+            from: 1
+            to: 365
+            textFromValue: (value, locale) => i18np("%1 day", "%1 days", value)
+            valueFromText: (text, locale) => parseInt(text)
+        }
+        QQC2.CheckBox {
+            id: countTeamReviews
+            text: i18n("Count review requests to my teams")
+        }
+        QQC2.CheckBox {
+            id: notifyOnCi
+            text: i18n("Desktop notification when CI starts failing or is fixed")
+        }
+        QQC2.CheckBox {
+            id: showActionBadge
+            text: i18n("Badge for pull requests that need my action (changes requested or conflicts)")
         }
     }
 }

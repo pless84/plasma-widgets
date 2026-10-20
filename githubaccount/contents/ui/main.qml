@@ -13,6 +13,7 @@ import "../code/look.js" as Look
 PlasmoidItem {
     id: root
 
+    readonly property string releaseScriptPath: Qt.resolvedUrl("../code/release.sh").toString().replace("file://", "")
     readonly property string scriptPath: Qt.resolvedUrl("../code/fetch.sh").toString().replace("file://", "")
     // Which gh account to show; empty means gh's active account.
     readonly property string account: Plasmoid.configuration.account.trim()
@@ -22,6 +23,8 @@ PlasmoidItem {
     property var reviews: []
     property var pullRequests: []
     property var repos: []
+    // CI category of every PR and repo at the last check, to spot changes; null before the first check.
+    property var ciSnapshot: null
     // Totals from GitHub, not capped at the 20 items the lists show.
     property int prCount: 0
     property int reviewCount: 0
@@ -31,9 +34,17 @@ PlasmoidItem {
     property bool loading: false
 
     readonly property var unreadNotifications: notifications.filter(n => n.unread)
+    // Only the newest Logic.notificationLimit unread notifications are fetched, so a full page may be more.
+    readonly property bool moreNotifications: unreadNotifications.length >= Logic.notificationLimit
+    readonly property bool countTeamReviews: Plasmoid.configuration.countTeamReviews
+
+    // Repos pushed recently enough for their main branch CI to say anything about now.
+    readonly property var shownRepos: Logic.recentRepos(repos, Plasmoid.configuration.ciRepoDays, Date.now())
+    // Your PRs with changes requested or merge conflicts.
+    readonly property var prActions: Logic.prCounts(pullRequests)
 
     // CI state of your open PRs plus the main branch of your recently pushed repos.
-    readonly property var ciCounts: Logic.ciCounts(pullRequests, repos)
+    readonly property var ciCounts: Logic.ciCounts(pullRequests, shownRepos)
     readonly property int ciFailing: ciCounts.failing
     readonly property int ciRunning: ciCounts.running
     readonly property int ciPassing: ciCounts.passing
@@ -56,8 +67,11 @@ PlasmoidItem {
     // The badges shown in the panel and the popup, PRTG-status-bar style; zero counts are hidden.
     readonly property var countBadges: [
         { label: i18n("review requests"), icon: "view-visible-symbolic", color: reviewsColor, count: reviewCount },
-        { label: i18n("unread notifications"), icon: "notifications-symbolic", color: notificationsColor, count: unreadNotifications.length },
+        { label: i18n("unread notifications"), icon: "notifications-symbolic", color: notificationsColor, count: unreadNotifications.length,
+          display: Logic.countText(unreadNotifications.length, Logic.notificationLimit) },
         { label: i18n("open pull requests"), icon: "vcs-merge-request-symbolic", color: pullRequestsColor, count: prCount },
+        { label: i18n("pull requests need your action"), icon: "dialog-warning-symbolic", color: ciFailingColor,
+          count: Plasmoid.configuration.showActionBadge ? prActions.needsAction : 0 },
         { label: i18n("CI failing"), icon: "dialog-cancel-symbolic", color: ciFailingColor, count: ciFailing },
         { label: i18n("CI running"), icon: "chronometer-symbolic", color: ciRunningColor, count: ciRunning },
         { label: i18n("CI passing"), icon: "checkmark-symbolic", color: ciPassingColor, count: ciPassing },
@@ -86,6 +100,43 @@ PlasmoidItem {
         return Logic.notificationUrl(n)
     }
 
+    // A release notification only knows its API URL; the release page is looked up when it is clicked.
+    // Falls back to the repo's releases list (fallbackUrl) if the lookup fails.
+    function openRelease(apiUrl, fallbackUrl) {
+        const cmd = "sh " + Logic.shellQuote(releaseScriptPath) + " " + Logic.shellQuote(account) + " " + Logic.shellQuote(apiUrl)
+        pendingReleases[cmd] = fallbackUrl
+        releaseLookup.connectSource(cmd)
+    }
+    property var pendingReleases: ({})
+
+    // The CI line of a PR or repo row: the failing checks' names, progress while running, else the state.
+    function ciText(item) {
+        const summary = Logic.checkSummary(item, 3)
+        if (summary && summary.kind === "failed") {
+            const names = summary.names.join(", ")
+            return summary.more > 0 ? i18n("Failed: %1 +%2", names, summary.more) : i18n("Failed: %1", names)
+        }
+        if (summary && summary.kind === "running") {
+            return i18np("%1/%2 done", "%1/%2 done", summary.done, summary.total)
+        }
+        return ciLabel(item.ci)
+    }
+
+    // Review and merge state of one of your PRs, e.g. "Changes requested · conflicts"; "" for nothing to say.
+    function prStatusText(pr) {
+        const words = {
+            changesRequested: i18n("changes requested"),
+            approved: i18n("approved"),
+            reviewRequired: i18n("review required"),
+            conflicts: i18n("conflicts"),
+            behind: i18n("behind base"),
+            unstable: i18n("checks unstable"),
+            ready: i18n("ready")
+        }
+        const text = Logic.prStatus(pr).map(key => words[key]).join(" · ")
+        return text.charAt(0).toUpperCase() + text.slice(1)
+    }
+
     function relativeTime(iso) {
         const age = Logic.age(iso, Date.now())
         switch (age.unit) {
@@ -95,10 +146,16 @@ PlasmoidItem {
         }
     }
 
+    property string currentSource: ""
+
     function refresh(markRead) {
         loading = true
-        executable.exec("sh " + Logic.shellQuote(scriptPath) + " " + Logic.shellQuote(account) + (markRead ? " mark-read" : ""))
+        // Only the newest command's result is applied; one for an earlier account or setting is ignored.
+        currentSource = "sh " + Logic.shellQuote(scriptPath) + " " + Logic.shellQuote(account) + (markRead ? " mark-read" : " -") + (countTeamReviews ? "" : " direct-only")
+        executable.exec(currentSource)
     }
+
+    onCountTeamReviewsChanged: refresh(false)
 
     onAccountChanged: {
         login = ""
@@ -106,6 +163,7 @@ PlasmoidItem {
         reviews = []
         pullRequests = []
         repos = []
+        ciSnapshot = null
         prCount = 0
         reviewCount = 0
         seenNotificationIds = null
@@ -123,6 +181,25 @@ PlasmoidItem {
         pullRequests = parsed.pullRequests
         repos = parsed.repos
         notifyAboutNew()
+        notifyAboutCi()
+    }
+
+    function notifyAboutCi() {
+        const changes = Logic.ciChanges(ciSnapshot, pullRequests, shownRepos)
+        ciSnapshot = changes.snapshot
+        const events = changes.events
+        if (events.length === 0 || !Plasmoid.configuration.notifyOnCi) {
+            return
+        }
+        const describe = e => (e.kind === "failing" ? i18n("CI failing: %1", e.title) : i18n("CI fixed: %1", e.title))
+        if (events.length === 1) {
+            ciNotification.title = describe(events[0])
+            ciNotification.text = events[0].subtitle + " · @" + login
+        } else {
+            ciNotification.title = i18np("%1 CI change", "%1 CI changes", events.length)
+            ciNotification.text = events.map(describe).slice(0, 3).concat(["@" + login]).join("\n")
+        }
+        ciNotification.sendEvent()
     }
 
     function notifyAboutNew() {
@@ -144,6 +221,19 @@ PlasmoidItem {
     }
 
     P5Support.DataSource {
+        id: releaseLookup
+        engine: "executable"
+        connectedSources: []
+        onNewData: (sourceName, data) => {
+            disconnectSource(sourceName)
+            const fallback = root.pendingReleases[sourceName]
+            delete root.pendingReleases[sourceName]
+            const page = (data["stdout"] || "").trim()
+            Qt.openUrlExternally(data["exit code"] === 0 && page.startsWith("https://github.com/") ? page : fallback)
+        }
+    }
+
+    P5Support.DataSource {
         id: executable
         engine: "executable"
         connectedSources: []
@@ -154,6 +244,9 @@ PlasmoidItem {
 
         onNewData: (sourceName, data) => {
             disconnectSource(sourceName)
+            if (sourceName !== root.currentSource) {
+                return
+            }
             root.loading = false
             root.lastChecked = new Date()
             if (data["exit code"] !== 0) {
@@ -201,9 +294,22 @@ PlasmoidItem {
         : PlasmaCore.Types.ActiveStatus
 
     toolTipMainText: login ? i18n("GitHub: %1", login) : i18n("GitHub Account")
+    // What needs your attention, e.g. "2 reviews · 5 unread · 1 CI failing · 1 PR has changes requested".
+    readonly property var attentionParts: [
+        reviewCount > 0 ? i18np("%1 review", "%1 reviews", reviewCount) : "",
+        unreadNotifications.length > 0
+            ? (moreNotifications ? i18n("%1+ unread", Logic.notificationLimit)
+                                 : i18np("%1 unread", "%1 unread", unreadNotifications.length)) : "",
+        ciFailing > 0 ? i18np("%1 CI failing", "%1 CI failing", ciFailing) : "",
+        prActions.changesRequested > 0
+            ? i18np("%1 PR has changes requested", "%1 PRs have changes requested", prActions.changesRequested) : "",
+        prActions.conflicts > 0 ? i18np("%1 PR has conflicts", "%1 PRs have conflicts", prActions.conflicts) : "",
+    ].filter(part => part !== "")
+
     toolTipSubText: errorText
         || (login && visibleBadges.length === 0 ? i18n("Nothing needs your attention") : "")
-        || visibleBadges.map(b => i18n("%1 %2", b.count, b.label)).join(" · ")
+        || (attentionParts.length > 0 ? attentionParts.join(" · ") : "")
+        || visibleBadges.map(b => i18n("%1 %2", b.display || b.count, b.label)).join(" · ")
 
     switchWidth: Kirigami.Units.gridUnit * 14
     switchHeight: Kirigami.Units.gridUnit * 14
@@ -226,6 +332,13 @@ PlasmoidItem {
             onTriggered: Qt.openUrlExternally("https://github.com/notifications")
         }
     ]
+
+    Notification {
+        id: ciNotification
+        componentName: "plasma_workspace"
+        eventId: "notification"
+        iconName: "vcs-branch"
+    }
 
     Notification {
         id: newNotification
@@ -279,7 +392,7 @@ PlasmoidItem {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             horizontalAlignment: Text.AlignHCenter
-            text: badge.count
+            text: badge.display || badge.count
             color: root.contrastText(root.look.colors.colorCountBackground)
             font.pixelSize: parent.size * 0.6
         }
@@ -369,9 +482,11 @@ PlasmoidItem {
         property string url
         property color dotColor: "transparent"
         property bool bold: false
+        // Set for a release notification: the page is looked up from this API URL on click.
+        property string releaseApiUrl: ""
 
         Layout.fillWidth: true
-        onClicked: Qt.openUrlExternally(url)
+        onClicked: releaseApiUrl ? root.openRelease(releaseApiUrl, url) : Qt.openUrlExternally(url)
 
         contentItem: RowLayout {
             spacing: Kirigami.Units.smallSpacing
@@ -539,7 +654,9 @@ PlasmoidItem {
                     id: reviewsHeader
                     groupKey: "reviews"
                     visible: root.reviews.length > 0
-                    text: i18n("Review requested (%1)", root.reviews.length)
+                    text: root.reviewCount > root.reviews.length
+        ? i18np("Review requested (showing %2 of %1)", "Review requested (showing %2 of %1)", root.reviewCount, root.reviews.length)
+        : i18np("Review requested (%1)", "Review requested (%1)", root.reviewCount)
                 }
                 Repeater {
                     model: reviewsHeader.collapsed ? [] : root.reviews
@@ -557,7 +674,9 @@ PlasmoidItem {
                 GroupHeader {
                     id: notificationsHeader
                     groupKey: "notifications"
-                    text: i18n("Notifications (%1 unread)", root.unreadNotifications.length)
+                    text: root.moreNotifications
+        ? i18n("Notifications (%1+ unread)", Logic.notificationLimit)
+        : i18np("Notifications (%1 unread)", "Notifications (%1 unread)", root.unreadNotifications.length)
                 }
                 Repeater {
                     model: notificationsHeader.collapsed ? [] : root.notifications
@@ -567,6 +686,7 @@ PlasmoidItem {
                         subtitle: i18n("%1 · %2 · %3", modelData.repository.full_name,
                                        modelData.reason.replace(/_/g, " "), root.relativeTime(modelData.updated_at))
                         url: root.notificationUrl(modelData)
+                        releaseApiUrl: modelData.subject.type === "Release" && modelData.subject.url ? modelData.subject.url : ""
                         dotColor: modelData.unread ? Kirigami.Theme.highlightColor : "transparent"
                         bold: modelData.unread
                     }
@@ -585,15 +705,18 @@ PlasmoidItem {
                     id: pullRequestsHeader
                     groupKey: "pullRequests"
                     visible: root.pullRequests.length > 0
-                    text: i18n("Your open pull requests (%1)", root.pullRequests.length)
+                    text: root.prCount > root.pullRequests.length
+        ? i18np("Your open pull requests (showing %2 of %1)", "Your open pull requests (showing %2 of %1)", root.prCount, root.pullRequests.length)
+        : i18np("Your open pull requests (%1)", "Your open pull requests (%1)", root.prCount)
                 }
                 Repeater {
                     model: pullRequestsHeader.collapsed ? [] : root.pullRequests
                     EntryRow {
                         required property var modelData
                         title: (modelData.isDraft ? i18n("[Draft] ") : "") + modelData.title
-                        subtitle: i18n("%1 #%2 · %3", modelData.repo, modelData.number, root.ciLabel(modelData.ci))
-                        url: modelData.url
+                        subtitle: [i18n("%1 #%2", modelData.repo, modelData.number), root.ciText(modelData), root.prStatusText(modelData)]
+                            .filter(part => part !== "").join(" · ")
+                        url: Logic.rowUrl(modelData, modelData.url)
                         dotColor: root.ciColor(modelData.ci)
                     }
                 }
@@ -601,16 +724,16 @@ PlasmoidItem {
                 GroupHeader {
                     id: reposHeader
                     groupKey: "repos"
-                    visible: Plasmoid.configuration.showRepos && root.repos.length > 0
+                    visible: Plasmoid.configuration.showRepos && root.shownRepos.length > 0
                     text: i18n("Recently pushed repositories")
                 }
                 Repeater {
-                    model: Plasmoid.configuration.showRepos && !reposHeader.collapsed ? root.repos : []
+                    model: Plasmoid.configuration.showRepos && !reposHeader.collapsed ? root.shownRepos : []
                     EntryRow {
                         required property var modelData
                         title: modelData.name
-                        subtitle: i18n("%1 · pushed %2", root.ciLabel(modelData.ci), root.relativeTime(modelData.pushedAt))
-                        url: modelData.url + "/actions"
+                        subtitle: i18n("%1 · pushed %2", root.ciText(modelData), root.relativeTime(modelData.pushedAt))
+                        url: Logic.rowUrl(modelData, modelData.url + "/actions")
                         dotColor: root.ciColor(modelData.ci)
                     }
                 }

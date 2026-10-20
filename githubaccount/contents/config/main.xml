@@ -22,6 +22,24 @@
       <label>Show CI status of recently pushed repositories</label>
       <default>true</default>
     </entry>
+    <entry name="countTeamReviews" type="Bool">
+      <label>Count review requests made to my teams, not only to me</label>
+      <default>true</default>
+    </entry>
+    <entry name="ciRepoDays" type="Int">
+      <label>Only count the CI of repositories pushed within this many days</label>
+      <default>14</default>
+      <min>1</min>
+      <max>365</max>
+    </entry>
+    <entry name="notifyOnCi" type="Bool">
+      <label>Send a desktop notification when CI starts failing or is fixed</label>
+      <default>true</default>
+    </entry>
+    <entry name="showActionBadge" type="Bool">
+      <label>Show a badge for pull requests with changes requested or merge conflicts</label>
+      <default>false</default>
+    </entry>
     <entry name="collapsedGroups" type="StringList">
       <label>Groups collapsed in the popup</label>
       <default></default>
