@@ -102,6 +102,10 @@ test("gpuPercent: how much of a model sits in GPU memory", () => {
     assert.equal(L.gpuPercent({ size_gb: 0, vram_gb: 0 }), null)
     // Exact bytes win: 40 MB on the CPU isn't "all on GPU", even though both round to 6.2 GB.
     assert.equal(L.gpuPercent({ size_gb: 6.2, vram_gb: 6.2, size: 6200000000, size_vram: 6160000000 }), 99)
+    // The Mac dashboard sends its own percentage and no VRAM size; never "NaN% on GPU".
+    assert.equal(L.gpuPercent({ size_gb: 9.1, gpu_pct: 100 }), 100)
+    assert.equal(L.gpuPercent({ size_gb: 9.1, gpu_pct: 62.4 }), 62)
+    assert.equal(L.gpuPercent({ size_gb: 9.1 }), null)
 })
 
 test("parseGpu: nvidia-smi and AMD lines; several GPUs count as one", () => {

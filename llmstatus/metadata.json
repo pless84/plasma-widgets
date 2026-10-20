@@ -12,7 +12,7 @@
         "Id": "dk.madebypless.llmstatus",
         "License": "GPL-2.0-or-later",
         "Name": "LLM Status",
-        "Version": "1.0",
+        "Version": "1.1",
         "Website": "https://github.com/pless84/plasma-widgets",
         "BugReportUrl": "https://github.com/pless84/plasma-widgets/issues"
     },

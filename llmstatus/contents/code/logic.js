@@ -116,12 +116,16 @@ function loadedCount(llm) {
 }
 
 // How much of a loaded model sits in GPU memory, in percent (Ollama splits big models
-// between GPU and CPU), or null when unknown. Uses the exact byte sizes when there are any.
+// between GPU and CPU), or null when unknown. Uses the dashboard's own figure (gpu_pct) when
+// there is one, else the exact byte sizes, else the GB sizes.
 function gpuPercent(model) {
+    if (typeof model.gpu_pct === "number" && !isNaN(model.gpu_pct)) {
+        return Math.round(model.gpu_pct)
+    }
     if (model.size > 0) {
         return Math.floor(model.size_vram / model.size * 100)
     }
-    return model.size_gb > 0 ? Math.round(model.vram_gb / model.size_gb * 100) : null
+    return model.size_gb > 0 && typeof model.vram_gb === "number" ? Math.round(model.vram_gb / model.size_gb * 100) : null
 }
 
 // Swap use in percent, or null when unknown.
