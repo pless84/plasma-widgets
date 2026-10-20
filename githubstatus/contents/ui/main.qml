@@ -285,8 +285,8 @@ PlasmoidItem {
         flow: vertical ? GridLayout.TopToBottom : GridLayout.LeftToRight
         rows: vertical ? Math.max(itemCount, 1) : 1
         columns: vertical ? 1 : Math.max(itemCount, 1)
-        rowSpacing: Kirigami.Units.smallSpacing
-        columnSpacing: Kirigami.Units.smallSpacing
+        rowSpacing: Plasmoid.configuration.badgeSpacing
+        columnSpacing: Plasmoid.configuration.badgeSpacing
 
         // Optional logo in front of the badges (panel only), chosen under Appearance.
         Kirigami.Icon {

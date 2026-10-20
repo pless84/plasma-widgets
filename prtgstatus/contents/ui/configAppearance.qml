@@ -11,6 +11,8 @@ KCM.SimpleKCM {
 
     property string cfg_badgeStyle
     property string cfg_badgeStyleDefault
+    property int cfg_badgeSpacing
+    property int cfg_badgeSpacingDefault
     property bool cfg_showLogo
     property bool cfg_showLogoDefault
     property string cfg_logoIcon
@@ -58,6 +60,23 @@ KCM.SimpleKCM {
             model: [i18n("Square"), i18n("Rounded")]
             currentIndex: page.cfg_badgeStyle === "rounded" ? 1 : 0
             onActivated: index => page.cfg_badgeStyle = index === 1 ? "rounded" : "square"
+        }
+
+        RowLayout {
+            Kirigami.FormData.label: i18n("Badge spacing:")
+
+            QQC2.Slider {
+                from: 0
+                to: 16
+                stepSize: 1
+                snapMode: QQC2.Slider.SnapAlways
+                value: page.cfg_badgeSpacing
+                onMoved: page.cfg_badgeSpacing = value
+            }
+
+            QQC2.Label {
+                text: i18n("%1 px", page.cfg_badgeSpacing)
+            }
         }
 
         QQC2.CheckBox {

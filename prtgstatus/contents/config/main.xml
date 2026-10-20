@@ -68,6 +68,10 @@
       <label>Icon name or image file for the logo; empty means the widget's own icon</label>
       <default></default>
     </entry>
+    <entry name="badgeSpacing" type="Int">
+      <label>Gap in pixels between the logo and the badges</label>
+      <default>4</default>
+    </entry>
     <entry name="badgeStyle" type="String">
       <label>Badge style: square or rounded</label>
       <default>square</default>
