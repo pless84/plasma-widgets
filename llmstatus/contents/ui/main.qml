@@ -112,7 +112,8 @@ PlasmoidItem {
 
     // "unloads in 4m", or "stays loaded" for models kept in memory indefinitely.
     function unloadText(expires) {
-        const left = Date.parse(expires) / 1000 - serverNow
+        // Ollama sends nanoseconds (".837530123"); Date.parse wants at most milliseconds.
+        const left = Date.parse(String(expires).replace(/(\.\d{3})\d+/, "$1")) / 1000 - serverNow
         if (isNaN(left)) return ""
         return left > 365 * 86400 ? i18n("stays loaded") : i18n("unloads in %1", Logic.formatDuration(left))
     }
@@ -144,11 +145,11 @@ PlasmoidItem {
         }
         loading = true
         const id = ++checkId
+        checkTimeout.restart()
         if (fromDashboard) {
             getJson(serverUrl + "/api/status", (data, status) => {
                 if (id !== checkId) return
-                loading = false
-                lastChecked = new Date()
+                finishCheck()
                 if (!data) {
                     errorText = status === 200 ? i18n("Could not read the dashboard's reply")
                         : status ? i18n("HTTP error %1", status) : i18n("Can't reach %1", serverUrl)
@@ -185,7 +186,6 @@ PlasmoidItem {
             ollamaAnswered(id)
         })
         if (readGpu) {
-            gpuReader.forCheck = id
             gpuReader.connectSource("sh " + Look.shellQuote(codeDir + "gpu.sh") + " # " + id)
         }
     }
@@ -199,13 +199,21 @@ PlasmoidItem {
     // One reply of an Ollama check is in; once all are, turn them into the status.
     function ollamaAnswered(id) {
         if (id !== checkId || --pendingLeft > 0) return
+        finishCheck()
+        applyOllama(pendingVersion ? "" : pendingVersionStatus === 200 ? i18n("Could not read the reply from %1", serverUrl)
+            : pendingVersionStatus ? i18n("HTTP error %1", pendingVersionStatus) : i18n("Can't reach %1", serverUrl))
+    }
+
+    function finishCheck() {
+        checkTimeout.stop()
         loading = false
         lastChecked = new Date()
+    }
+
+    function applyOllama(error) {
         errorText = ""
         serverNow = Date.now() / 1000
         host = null
-        const error = pendingVersion ? ""
-            : pendingVersionStatus ? i18n("HTTP error %1", pendingVersionStatus) : i18n("Can't reach %1", serverUrl)
         apply(Logic.fromOllama(pendingVersion, pendingPs, pendingTags, pendingGpu, error))
     }
 
@@ -215,7 +223,7 @@ PlasmoidItem {
         llmSnapshot = result.snapshot
         loaded = true
         if (result.wentDown.length > 0 && Plasmoid.configuration.notifyOnDown) {
-            notification.title = i18np("LLM server down", "%1 LLM servers down", result.wentDown.length)
+            notification.title = i18np("%1 LLM server down", "%1 LLM servers down", result.wentDown.length)
             notification.text = result.wentDown.map(s => s.error ? s.name + " · " + s.error : s.name).join("\n")
             notification.sendEvent()
         }
@@ -223,6 +231,7 @@ PlasmoidItem {
 
     function reset() {
         checkId++
+        checkTimeout.stop()
         loaded = false
         llm = null
         llmSnapshot = null
@@ -235,14 +244,31 @@ PlasmoidItem {
     onServerUrlChanged: reset()
     onReadGpuChanged: reset()
 
-    // Runs gpu.sh; each run has the check's number appended, so it's always a new command.
+    // Runs gpu.sh. Each run ends in "# <check number>", which makes it a new command every time
+    // and says which check the output belongs to.
     P5Support.DataSource {
         id: gpuReader
-        property int forCheck: 0
         engine: "executable"
         onNewData: (sourceName, data) => {
             disconnectSource(sourceName)
-            root.gpuAnswered(forCheck, data.stdout || "")
+            root.gpuAnswered(parseInt(sourceName.split("# ").pop()), data.stdout || "")
+        }
+    }
+
+    // Gives up on a check that hasn't finished after 20 seconds (e.g. a server that accepts the
+    // connection but never answers), so the widget keeps checking.
+    Timer {
+        id: checkTimeout
+        interval: 20000
+        onTriggered: {
+            if (!root.loading) return
+            root.checkId++
+            root.finishCheck()
+            if (root.fromDashboard) {
+                root.errorText = i18n("No answer from %1", root.serverUrl)
+            } else {
+                root.applyOllama(root.pendingVersion ? "" : i18n("No answer from %1", root.serverUrl))
+            }
         }
     }
 
@@ -625,7 +651,8 @@ PlasmoidItem {
 
                 // ---- The servers ----
                 Repeater {
-                    model: root.loaded ? root.servers : []
+                    // Hidden while the dashboard can't be reached, rather than showing the last known state.
+                    model: root.loaded && !root.errorText ? root.servers : []
 
                     PlasmaComponents.ItemDelegate {
                         id: serverItem
@@ -701,7 +728,7 @@ PlasmoidItem {
                 // ---- Ollama's loaded models ----
                 GroupHeader {
                     id: loadedHeader
-                    visible: root.ollama !== null && root.ollama.up
+                    visible: root.ollama !== null && root.ollama.up && !root.errorText
                     groupKey: "loaded"
                     text: i18n("Loaded models")
                 }
@@ -768,9 +795,9 @@ PlasmoidItem {
                 // ---- Ollama's installed models ----
                 GroupHeader {
                     id: installedHeader
-                    visible: root.installedModels.length > 0
+                    visible: root.installedModels.length > 0 && !root.errorText
                     groupKey: "installed"
-                    text: i18np("Installed model", "Installed models (%1)", root.installedModels.length)
+                    text: i18np("Installed model (%1)", "Installed models (%1)", root.installedModels.length)
                 }
 
                 Repeater {

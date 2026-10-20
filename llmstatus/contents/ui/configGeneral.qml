@@ -24,7 +24,11 @@ KCM.SimpleKCM {
             Kirigami.FormData.label: i18n("Source:")
             model: [i18n("Ollama server"), i18n("Mac server dashboard")]
             currentIndex: page.fromDashboard ? 1 : 0
-            onActivated: index => page.cfg_source = index === 1 ? "dashboard" : "ollama"
+            onActivated: index => {
+                page.cfg_source = index === 1 ? "dashboard" : "ollama"
+                // Choosing breaks the binding above; restore it so Defaults still updates the box.
+                currentIndex = Qt.binding(() => page.fromDashboard ? 1 : 0)
+            }
         }
 
         QQC2.TextField {

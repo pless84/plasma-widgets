@@ -60,6 +60,8 @@ function fromOllama(version, ps, tags, gpu, error) {
         name: m.name || m.model || "",
         size_gb: gigabytes(m.size),
         vram_gb: gigabytes(m.size_vram),
+        size: m.size || 0,
+        size_vram: m.size_vram || 0,
         expires: m.expires_at || ""
     })) : []
     const installed = up && tags && Array.isArray(tags.models)
@@ -114,8 +116,11 @@ function loadedCount(llm) {
 }
 
 // How much of a loaded model sits in GPU memory, in percent (Ollama splits big models
-// between GPU and CPU), or null when unknown.
+// between GPU and CPU), or null when unknown. Uses the exact byte sizes when there are any.
 function gpuPercent(model) {
+    if (model.size > 0) {
+        return Math.floor(model.size_vram / model.size * 100)
+    }
     return model.size_gb > 0 ? Math.round(model.vram_gb / model.size_gb * 100) : null
 }
 

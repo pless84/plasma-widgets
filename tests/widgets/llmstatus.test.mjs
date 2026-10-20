@@ -63,7 +63,8 @@ test("llmChanges: servers going down, never on the first check", () => {
 test("fromOllama: version, loaded and installed models", () => {
     const block = L.fromOllama(version, ps, tags, { util: 40 }, "")
     assert.equal(block.gpu.util, 40)
-    assert.deepEqual(block.ollama.models, [{ name: "qwen3:8b", size_gb: 6.2, vram_gb: 4.7, expires: "2026-10-20T10:05:00+02:00" }])
+    assert.deepEqual(block.ollama.models, [{ name: "qwen3:8b", size_gb: 6.2, vram_gb: 4.7, size: 6200000000, size_vram: 4650000000,
+                                             expires: "2026-10-20T10:05:00+02:00" }])
     assert.deepEqual(block.ollama.installed.map(m => m.name), ["gemma3:12b", "qwen3:8b"])
     assert.equal(block.ollama.installed[0].size_gb, 8.1)
     const [server] = L.llmServers(block)
@@ -99,6 +100,8 @@ test("gpuPercent: how much of a model sits in GPU memory", () => {
     assert.equal(L.gpuPercent({ size_gb: 6.2, vram_gb: 6.2 }), 100)
     assert.equal(L.gpuPercent({ size_gb: 10, vram_gb: 4 }), 40)
     assert.equal(L.gpuPercent({ size_gb: 0, vram_gb: 0 }), null)
+    // Exact bytes win: 40 MB on the CPU isn't "all on GPU", even though both round to 6.2 GB.
+    assert.equal(L.gpuPercent({ size_gb: 6.2, vram_gb: 6.2, size: 6200000000, size_vram: 6160000000 }), 99)
 })
 
 test("parseGpu: nvidia-smi and AMD lines; several GPUs count as one", () => {

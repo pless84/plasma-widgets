@@ -3,8 +3,12 @@
 # NVIDIA cards through nvidia-smi, otherwise AMD cards through their sysfs counters.
 # Prints nothing when there is no supported GPU.
 
+# nvidia-smi can hang when the driver is stuck, so it gets 5 seconds (where `timeout` exists).
+limit=""
+command -v timeout >/dev/null 2>&1 && limit="timeout 5"
+
 if command -v nvidia-smi >/dev/null 2>&1 \
-    && nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,name --format=csv,noheader,nounits 2>/dev/null; then
+    && $limit nvidia-smi --query-gpu=utilization.gpu,memory.used,memory.total,name --format=csv,noheader,nounits 2>/dev/null; then
     exit 0
 fi
 
