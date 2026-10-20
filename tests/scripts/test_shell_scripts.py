@@ -1,4 +1,4 @@
-"""fetch.sh / action.sh for PRTG, Docker and GitHub Account."""
+"""fetch.sh / action.sh for PRTG, Docker and GitHub Account; gpu.sh for LLM Status."""
 import json
 import shutil
 from urllib.parse import parse_qs, urlsplit
@@ -134,3 +134,22 @@ def test_github_fetch_unknown_account(gh, run):
 def test_github_mark_read(gh, run):
     assert run("githubaccount", "fetch.sh", "", "mark-read").returncode == 0
     assert gh.calls("gh")[0]["args"] == ["api", "-X", "PUT", "notifications", "--silent"]
+
+
+# LLM Status: gpu.sh with a stub nvidia-smi.
+
+def test_llm_gpu_nvidia(stubs, run):
+    stubs.add("nvidia-smi", 'echo "37, 2471, 12227, NVIDIA GeForce RTX 5070"')
+    result = run("llmstatus", "gpu.sh")
+    assert result.returncode == 0
+    assert result.stdout == "37, 2471, 12227, NVIDIA GeForce RTX 5070\n"
+    assert stubs.calls("nvidia-smi")[-1]["args"] == [
+        "--query-gpu=utilization.gpu,memory.used,memory.total,name", "--format=csv,noheader,nounits"]
+
+
+def test_llm_gpu_nvidia_failing_is_not_an_error(stubs, run):
+    # e.g. the driver isn't loaded: the script falls back to AMD's counters and still succeeds.
+    stubs.add("nvidia-smi", "echo 'NVIDIA-SMI has failed' >&2; exit 9")
+    result = run("llmstatus", "gpu.sh")
+    assert result.returncode == 0
+    assert "NVIDIA-SMI has failed" not in result.stdout

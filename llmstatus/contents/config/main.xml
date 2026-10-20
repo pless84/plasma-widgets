@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0 http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+  <group name="General">
+    <entry name="source" type="String">
+      <label>Where the status comes from: "ollama" (an Ollama server's API) or "dashboard" (a Mac server dashboard's /api/status)</label>
+      <default>ollama</default>
+    </entry>
+    <entry name="ollamaUrl" type="String">
+      <label>Address of the Ollama server</label>
+      <default>http://localhost:11434</default>
+    </entry>
+    <entry name="dashboardUrl" type="String">
+      <label>Address of the Mac server dashboard (its /api/status is read)</label>
+      <default></default>
+    </entry>
+    <entry name="showGpu" type="Bool">
+      <label>Read the GPU load on this computer (NVIDIA through nvidia-smi, or AMD); Ollama source only</label>
+      <default>true</default>
+    </entry>
+    <entry name="pollInterval" type="Int">
+      <label>Seconds between status checks</label>
+      <default>10</default>
+      <min>5</min>
+      <max>600</max>
+    </entry>
+    <entry name="showStatusInPanel" type="Bool">
+      <label>Show the status badge (GPU load, coloured by server state)</label>
+      <default>true</default>
+    </entry>
+    <entry name="showLoadedInPanel" type="Bool">
+      <label>Show the loaded models badge</label>
+      <default>true</default>
+    </entry>
+    <entry name="showZeroInPanel" type="Bool">
+      <label>Show the loaded models badge even with no model loaded</label>
+      <default>false</default>
+    </entry>
+    <entry name="notifyOnDown" type="Bool">
+      <label>Send a notification when an LLM server goes down</label>
+      <default>true</default>
+    </entry>
+    <entry name="collapsedGroups" type="StringList">
+      <label>Groups collapsed in the popup</label>
+      <default>installed</default>
+    </entry>
+  </group>
+  <group name="Appearance">
+    <entry name="useSharedLook" type="Bool">
+      <label>Follow the shared look (same for all madebypless widgets) instead of this widget's own appearance settings, once a shared look has been saved</label>
+      <default>true</default>
+    </entry>
+    <entry name="showLogo" type="Bool">
+      <label>Show a logo in front of the badges in the panel</label>
+      <default>false</default>
+    </entry>
+    <entry name="logoIcon" type="String">
+      <label>Icon name or image file for the logo; empty means the widget's own icon</label>
+      <default></default>
+    </entry>
+    <entry name="badgeSpacing" type="Int">
+      <label>Gap in pixels between the logo and the badges</label>
+      <default>4</default>
+    </entry>
+    <entry name="logoSpacing" type="Int">
+      <label>Extra gap in pixels between the logo and the first badge</label>
+      <default>0</default>
+    </entry>
+    <entry name="badgeStyle" type="String">
+      <label>Panel style: square badges, rounded badges, or an icon with a status dot</label>
+      <default>square</default>
+    </entry>
+    <entry name="colorDown" type="Color">
+      <label>Colour of the status badge while a server is down</label>
+      <default>#cf222e</default>
+    </entry>
+    <entry name="colorBusy" type="Color">
+      <label>Colour of the status badge while the GPU is busy</label>
+      <default>#bf8700</default>
+    </entry>
+    <entry name="colorIdle" type="Color">
+      <label>Colour of the status badge while the servers are up and the GPU is idle</label>
+      <default>#1a7f37</default>
+    </entry>
+    <entry name="colorLoaded" type="Color">
+      <label>Colour of the loaded models badge</label>
+      <default>#0969da</default>
+    </entry>
+    <entry name="colorCountBackground" type="Color">
+      <label>Count background badge colour</label>
+      <default>#2b2f33</default>
+    </entry>
+  </group>
+</kcfg>

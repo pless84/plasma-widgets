@@ -7,12 +7,12 @@
             }
         ],
         "Category": "System Information",
-        "Description": "Self-hosted GitHub Actions runners as status badges (offline, busy, idle), plus local LLM servers (Ollama, MLX), GPU load and scheduled jobs such as backups, from a Mac server dashboard's /api/status",
+        "Description": "Self-hosted GitHub Actions runners as status badges (offline, busy, idle), plus scheduled jobs such as backups, from a Mac server dashboard's /api/status. Local LLMs are in the LLM Status widget.",
         "Icon": "run-build",
         "Id": "dk.madebypless.runnerstatus",
         "License": "GPL-2.0-or-later",
         "Name": "Runner Status",
-        "Version": "1.7",
+        "Version": "1.8",
         "Website": "https://github.com/pless84/plasma-widgets",
         "BugReportUrl": "https://github.com/pless84/plasma-widgets/issues"
     },

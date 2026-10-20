@@ -28,10 +28,6 @@ PlasmoidItem {
     property date lastChecked
     property string errorText: ""
     property bool loading: false
-    // The dashboard's "llm" block ({gpu, memory, ollama, mlx}), or null when it has none.
-    property var llm: null
-    // What Logic.llmChanges() returned last time; null until the first check.
-    property var llmSnapshot: null
 
     // The dashboard's "jobs" list (scheduled LaunchAgents, e.g. a nightly backup); empty on older dashboards.
     property var jobs: []
@@ -45,36 +41,8 @@ PlasmoidItem {
         : null
     readonly property string jobsSummary: failingJobCount > 0
         ? i18np("%1 scheduled job failing", "%1 scheduled jobs failing", failingJobCount) : ""
-    // The badges after the runner badges: local LLMs, then failing jobs.
-    readonly property var extraBadges: [llmBadge, jobsBadge].filter(b => b)
-
-    readonly property var llmServers: Logic.llmServers(llm)
-    readonly property string llmState: Logic.llmState(llm)
-    // The panel's LLM badge: the GPU load, coloured and marked by the servers' state.
-    readonly property var llmBadge: {
-        if (!llmState || !Plasmoid.configuration.showLlmInPanel) return null
-        const glyph = llmState === "down" ? "cross" : llmState === "busy" ? "play" : "check"
-        return {
-            key: "llm", glyph: glyph, roundGlyph: glyph,
-            count: llm.gpu && llm.gpu.util !== null && llm.gpu.util !== undefined ? llm.gpu.util + "%" : "–",
-            color: llmState === "down" ? root.look.colors.colorOffline
-                : llmState === "busy" ? root.look.colors.colorBusy : root.look.colors.colorIdle,
-        }
-    }
-    readonly property string llmGpuText: {
-        if (!llm || !llm.gpu) return ""
-        const g = llm.gpu, m = llm.memory || {}
-        const num = v => v === null || v === undefined ? "–" : v
-        return i18n("GPU %1% · %2 GB allocated · RAM %3% used · swap %4 / %5 GB", num(g.util), num(g.alloc_gb),
-                    m.free_pct === null || m.free_pct === undefined ? "–" : 100 - m.free_pct,
-                    num(m.swap_used_gb), num(m.swap_total_gb))
-    }
-    readonly property string llmSummary: {
-        if (!llmState) return ""
-        const down = llmServers.filter(s => !s.up).length
-        if (down > 0) return i18np("%1 LLM server down", "%1 LLM servers down", down)
-        return i18n("LLMs: GPU %1%", llm.gpu && llm.gpu.util !== null && llm.gpu.util !== undefined ? llm.gpu.util : "–")
-    }
+    // The badges after the runner badges: failing jobs. (Local LLMs are in the LLM Status widget.)
+    readonly property var extraBadges: [jobsBadge].filter(b => b)
 
     // Runner states in panel order, worst first. Colours come from the Appearance settings and
     // default to the dashboard's own; "glyph" is the square style's symbol, "roundGlyph" the rounded one's.
@@ -173,9 +141,6 @@ PlasmoidItem {
         host = data.host
         runners = data.runners
         snapshot = result.snapshot
-        llm = data.llm || null
-        const llmResult = Logic.llmChanges(llm, llmSnapshot)
-        llmSnapshot = llmResult.snapshot
         jobs = data.jobs || []
         const jobResult = Logic.jobChanges(jobs, jobSnapshot)
         jobSnapshot = jobResult.snapshot
@@ -191,12 +156,6 @@ PlasmoidItem {
                 return j.name + (line ? " · " + line.text : "")
             }).join("\n")
             jobNotification.sendEvent()
-        }
-
-        if (llmResult.wentDown.length > 0 && Plasmoid.configuration.notifyOnLlmDown) {
-            notification.title = i18np("LLM server down", "%1 LLM servers down", llmResult.wentDown.length)
-            notification.text = llmResult.wentDown.map(s => s.name).join("\n")
-            notification.sendEvent()
         }
 
         if (result.wentOffline.length > 0 && Plasmoid.configuration.notifyOnOffline) {
@@ -219,8 +178,6 @@ PlasmoidItem {
         runners = []
         host = null
         snapshot = null
-        llm = null
-        llmSnapshot = null
         jobs = []
         jobSnapshot = null
         errorText = ""
@@ -258,7 +215,7 @@ PlasmoidItem {
         : PlasmaCore.Types.ActiveStatus
 
     toolTipMainText: i18n("Runner Status")
-    toolTipSubText: errorText || [summary, llmSummary, jobsSummary].filter(t => t).join("\n")
+    toolTipSubText: errorText || [summary, jobsSummary].filter(t => t).join("\n")
 
     switchWidth: Kirigami.Units.gridUnit * 12
     switchHeight: Kirigami.Units.gridUnit * 12
@@ -284,7 +241,7 @@ PlasmoidItem {
         iconName: "run-build"
     }
 
-    // Its own notification, so a failing job doesn't replace a runner or LLM one sent in the same check.
+    // Its own notification, so a failing job doesn't replace a runner one sent in the same check.
     Notification {
         id: jobNotification
         componentName: "plasma_workspace"
@@ -632,107 +589,6 @@ PlasmoidItem {
                 width: scroll.availableWidth
                 spacing: Kirigami.Units.smallSpacing
 
-                // ---- Local LLMs, when the dashboard reports them ----
-                GroupHeader {
-                    id: llmHeader
-                    visible: root.llm !== null
-                    groupKey: "llm"
-                    text: i18n("Local LLMs")
-                }
-
-                PlasmaComponents.Label {
-                    textFormat: Text.PlainText
-                    Layout.fillWidth: true
-                    Layout.leftMargin: Kirigami.Units.smallSpacing
-                    Layout.rightMargin: Kirigami.Units.smallSpacing
-                    visible: root.llmGpuText !== "" && !llmHeader.collapsed
-                    wrapMode: Text.WordWrap
-                    font: Kirigami.Theme.smallFont
-                    // Nearly full swap is the usual reason generation slows down.
-                    color: (Logic.swapPercent(root.llm ? root.llm.memory : null) || 0) >= 80
-                        ? root.stateColor("busy") : Kirigami.Theme.textColor
-                    text: root.llmGpuText
-                }
-
-                Repeater {
-                    model: llmHeader.collapsed ? [] : root.llmServers
-
-                    PlasmaComponents.ItemDelegate {
-                        id: llmItem
-                        required property var modelData
-                        readonly property color stateColor: root.stateColor(modelData.up ? "idle" : "offline")
-
-                        Layout.fillWidth: true
-                        onClicked: Qt.openUrlExternally(root.serverUrl)
-
-                        contentItem: ColumnLayout {
-                            spacing: 0
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: Kirigami.Units.smallSpacing
-
-                                Rectangle {
-                                    Layout.preferredWidth: Kirigami.Units.smallSpacing * 2
-                                    Layout.preferredHeight: width
-                                    radius: width / 2
-                                    color: llmItem.stateColor
-                                }
-                                PlasmaComponents.Label {
-                                    textFormat: Text.PlainText
-                                    Layout.fillWidth: true
-                                    text: llmItem.modelData.kind === "mlx" ? i18n("MLX · %1", llmItem.modelData.name) : llmItem.modelData.name
-                                    font.bold: true
-                                    elide: Text.ElideRight
-                                }
-                                PlasmaComponents.Label {
-                                    textFormat: Text.PlainText
-                                    text: llmItem.modelData.up ? i18n("Up") : i18n("Down")
-                                    color: llmItem.stateColor
-                                }
-                            }
-
-                            // Ollama: the loaded models. MLX: memory and prompt cache.
-                            PlasmaComponents.Label {
-                                textFormat: Text.PlainText
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
-                                text: {
-                                    const s = llmItem.modelData
-                                    if (!s.up) return s.error || i18n("Not responding")
-                                    if (s.kind === "ollama") {
-                                        return s.models.length === 0 ? i18n("No model loaded")
-                                            : s.models.map(m => m.expires
-                                                ? i18n("%1 · %2 GB · unloads in %3", m.name, m.size_gb,
-                                                       Logic.formatDuration(Date.parse(m.expires) / 1000 - root.serverNow))
-                                                : i18n("%1 · %2 GB", m.name, m.size_gb)).join(", ")
-                                    }
-                                    return [
-                                        s.footprintGb !== null && s.footprintGb !== undefined ? i18n("%1 GB in memory", s.footprintGb) : "",
-                                        s.promptCache ? i18n("prompt cache %1 GB", s.promptCache.gb) : "",
-                                    ].filter(t => t).join(" · ")
-                                }
-                            }
-
-                            PlasmaComponents.Label {
-                                textFormat: Text.PlainText
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
-                                font: Kirigami.Theme.smallFont
-                                opacity: 0.7
-                                text: {
-                                    const s = llmItem.modelData
-                                    return [
-                                        s.kind === "ollama" ? (s.version ? "v" + s.version : "") : s.label,
-                                        s.kind === "mlx" && s.up && s.uptime ? i18n("up %1", Logic.formatDuration(s.uptime)) : "",
-                                        s.lastRequest ? i18n("last request %1", root.ago(s.lastRequest)) : i18n("no requests yet"),
-                                    ].filter(t => t).join(" · ")
-                                }
-                            }
-                        }
-                    }
-                }
-
                 // ---- Scheduled jobs (e.g. a nightly backup), when the dashboard reports any ----
                 GroupHeader {
                     id: jobsHeader
@@ -818,7 +674,7 @@ PlasmoidItem {
                 // Only needed to tell the runners apart from the sections above them.
                 GroupHeader {
                     id: runnersHeader
-                    visible: (root.llm !== null || root.jobs.length > 0) && root.runners.length > 0
+                    visible: root.jobs.length > 0 && root.runners.length > 0
                     groupKey: "runners"
                     text: i18n("Runners")
                 }

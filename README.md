@@ -1,6 +1,6 @@
 # Plasma Widgets
 
-KDE Plasma 6 widgets for keeping an eye on GitHub, PRTG, Docker, Bugsink, Sentry, Dokploy and self-hosted GitHub Actions runners from the panel or desktop.
+KDE Plasma 6 widgets for keeping an eye on GitHub, PRTG, Docker, Bugsink, Sentry, Dokploy, self-hosted GitHub Actions runners and local LLMs (Ollama) from the panel or desktop.
 
 **Not on KDE Plasma?** The [Status Badges tray app](tray/) brings the same badges to Windows, macOS and any Linux desktop with a system tray.
 
@@ -13,7 +13,8 @@ KDE Plasma 6 widgets for keeping an eye on GitHub, PRTG, Docker, Bugsink, Sentry
 | [Bugsink Status](bugsinkstatus) | `dk.madebypless.bugsinkstatus` | Status badges for your Bugsink issues (new, open, muted, resolved), with the open issues per project and resolve / mute buttons |
 | [Sentry Status](sentrystatus) | `dk.madebypless.sentrystatus` | Status badges for your Sentry issues (new, open, archived, resolved), with the unresolved issues per project and resolve / archive buttons |
 | [Dokploy Status](dokploystatus) | `dk.madebypless.dokploystatus` | Status badges for your Dokploy applications, Compose stacks and databases (failed, deploying, deployed, idle), with deploy / start / stop buttons |
-| [Runner Status](runnerstatus) | `dk.madebypless.runnerstatus` | Status badges for self-hosted GitHub Actions runners (offline, busy, idle) local LLM servers and scheduled jobs (e.g. backups) from a [Mac server dashboard](https://github.com/pless84/mac-server-dashboard)'s `/api/status`, with the running job and last result per runner |
+| [Runner Status](runnerstatus) | `dk.madebypless.runnerstatus` | Status badges for self-hosted GitHub Actions runners (offline, busy, idle) and scheduled jobs (e.g. backups) from a [Mac server dashboard](https://github.com/pless84/mac-server-dashboard)'s `/api/status`, with the running job and last result per runner |
+| [LLM Status](llmstatus) | `dk.madebypless.llmstatus` | A status badge with the GPU load and a loaded-models badge for an Ollama server (on this computer or another), with its loaded and installed models; or the LLM servers (Ollama, MLX) from a Mac server dashboard |
 
 Every badge widget offers square or rounded badges, adjustable colours, a choice of which states get a badge, and an optional logo in front of the badges in the panel (any icon, or an image file such as a downloaded logo). Find these under **Appearance** and **General** in the widget's settings.
 
@@ -97,9 +98,20 @@ Self-hosted GitHub Actions runners, read from a [Mac server dashboard](https://g
 
 The widget checks every 15 seconds by default and notifies you when a runner goes offline or a job fails. A runner the dashboard reports as anything other than idle or busy counts as offline.
 
-If the dashboard also reports local LLMs (as [mac-server-dashboard](https://github.com/pless84/mac-server-dashboard) does), the panel gets one more badge showing the GPU load. It's green when idle, yellow while the GPU is busy (10% or more) and red when Ollama or an MLX server is down. The popup gains a **Local LLMs** section with GPU, RAM and swap use, Ollama's loaded models, and each MLX server's memory and last request. You can turn the badge and the "server down" notification off under **General**.
+Local LLMs (Ollama, MLX) that the dashboard reports are shown by the [LLM Status](#llm-status) widget.
 
 If the dashboard reports scheduled jobs (LaunchAgents that run on a schedule, such as a nightly backup), the popup gains a **Scheduled jobs** section: each job's schedule, when it last ran, when it runs next and the newest line of its log. While a job has failed (its last exit code isn't 0) or missed a scheduled run, the panel shows a red badge with the number of such jobs, and you get a notification when a job starts failing or fails again on a later run. Both can be turned off under **General**.
+
+### LLM Status
+
+Local LLMs at a glance. By default it talks to the Ollama server on this computer (`http://localhost:11434`; set another address under **General**) and reads this computer's GPU load through `nvidia-smi` or, for AMD cards, the kernel's counters. The panel shows two badges:
+
+- **Status**: the GPU load, green while Ollama is up and the GPU idle, yellow while the GPU is busy (10% or more) and red when Ollama is down.
+- **Loaded models**: how many models Ollama holds in memory (hidden when none is loaded, unless you switch that on).
+
+Click for the server's version and address, each loaded model's size, how much of it sits on the GPU and when it unloads, and the installed models (collapsed by default). The widget checks every 10 seconds and notifies you when the server goes down.
+
+Under **General** you can switch the source to a [Mac server dashboard](https://github.com/pless84/mac-server-dashboard) instead: the widget then shows the LLM servers it reports (Ollama and MLX) with the Mac's GPU, RAM and swap use, as Runner Status used to.
 
 ## Install
 

@@ -14,8 +14,6 @@ KCM.SimpleKCM {
     property alias cfg_showIdleInPanel: showIdleInPanel.checked
     property alias cfg_showZeroInPanel: showZeroInPanel.checked
     property alias cfg_showTotalInPanel: showTotalInPanel.checked
-    property alias cfg_showLlmInPanel: showLlmInPanel.checked
-    property alias cfg_notifyOnLlmDown: notifyOnLlmDown.checked
     property alias cfg_showJobsInPanel: showJobsInPanel.checked
     property alias cfg_notifyOnJobProblem: notifyOnJobProblem.checked
 
@@ -66,10 +64,6 @@ KCM.SimpleKCM {
             text: i18n("Show the total, e.g. \"(of 2)\"")
         }
         QQC2.CheckBox {
-            id: showLlmInPanel
-            text: i18n("Local LLMs (GPU load; red if a server is down)")
-        }
-        QQC2.CheckBox {
             id: showJobsInPanel
             text: i18n("Scheduled jobs, while one has failed or missed its run")
         }
@@ -82,10 +76,6 @@ KCM.SimpleKCM {
         QQC2.CheckBox {
             id: notifyOnFailedJob
             text: i18n("Notify when a job fails")
-        }
-        QQC2.CheckBox {
-            id: notifyOnLlmDown
-            text: i18n("Notify when a local LLM server goes down")
         }
         QQC2.CheckBox {
             id: notifyOnJobProblem

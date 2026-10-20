@@ -1,0 +1,21 @@
+{
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Jakob Pless",
+                "Email": "pless84@gmail.com"
+            }
+        ],
+        "Category": "System Information",
+        "Description": "Local LLM servers as status badges: an Ollama server's loaded and installed models plus this computer's GPU load, or the LLM servers (Ollama, MLX) from a Mac server dashboard's /api/status",
+        "Icon": "cpu",
+        "Id": "dk.madebypless.llmstatus",
+        "License": "GPL-2.0-or-later",
+        "Name": "LLM Status",
+        "Version": "1.0",
+        "Website": "https://github.com/pless84/plasma-widgets",
+        "BugReportUrl": "https://github.com/pless84/plasma-widgets/issues"
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
