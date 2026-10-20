@@ -32,6 +32,8 @@ The panel shows a badge per component state (major outage, partial outage, degra
 
 <img src="screenshots/githubstatus-popup.png" width="396" alt="GitHub Status popup: All Systems Operational, with every component listed as operational and the badge row along the bottom">
 
+Each incident in the popup shows its status (Investigating, Identified, Monitoring…), which services it affects and GitHub's latest update. You get a notification when an incident starts, moves to its next step or is resolved, and in badge mode an extra badge marks an ongoing incident even when no component is listed as affected. Maintenance in progress and upcoming scheduled maintenance have their own sections.
+
 ### GitHub Account
 
 The panel shows count badges for review requests, unread notifications, open pull requests, and CI failing / running / passing. Badges with a zero count are hidden, and the badge style (square or rounded) and every colour can be changed under **Appearance** in the widget's settings. Click for the full lists:
@@ -40,6 +42,8 @@ The panel shows count badges for review requests, unread notifications, open pul
 
 <img src="screenshots/githubaccount-popup.png" width="468" alt="GitHub Account popup: review requests, notifications with unread ones in bold, open pull requests with check dots, and the count badges along the bottom">
 
+Your own pull requests show their review and merge state ("Changes requested · conflicts", "Approved · ready", "Behind base"), and a failing PR or repository names the checks that failed; clicking it opens the first failing check. You get a notification when CI starts failing or is fixed. Under **General** you can leave out review requests sent to your teams and choose how recently pushed a repository must be to count towards the CI badges (14 days by default).
+
 ### PRTG Status
 
 The panel shows a badge per sensor state, like PRTG's own status bar. Under **Appearance** in the widget's settings you can switch to a rounded style like PRTG's newer interface and change every colour. In the General settings you can pick which states get a badge (in the panel and the popup), show states with no sensors, and add the total (e.g. "(of 919)"). Click for the problem sensors, plus the unknown, paused or up sensors when their badge is switched on:
@@ -47,6 +51,8 @@ The panel shows a badge per sensor state, like PRTG's own status bar. Under **Ap
 <img src="screenshots/prtgstatus-panel.png" width="324" alt="PRTG Status in the panel: badges for 1 down, 1 down acknowledged, 2 warning, 1 unusual, 42 paused and 873 up">
 
 <img src="screenshots/prtgstatus-popup.png" width="468" alt="PRTG Status popup: sensors grouped under Down, Warning, Unusual and Acknowledged, with the status badges along the bottom">
+
+Down sensors show how long they have been down, and each group lists the highest-priority, longest-down sensors first (priority stars appear when your sensors' priorities differ). Hover a sensor for its probe and group. With more than one probe, the tooltip and popup show the counts per probe and flag a probe whose sensors are all unknown, which usually means the probe itself is down. The counts come from PRTG's sensor tree in two small requests instead of downloading every sensor. Under **General** you can limit notifications to sensors of a minimum priority.
 
 ### Docker Status
 
@@ -60,6 +66,8 @@ Each Compose stack also has a remove button that runs `docker compose --project-
 
 A container counts as **failed** when it exited with an error. Exiting normally or being stopped with `docker stop` counts as **stopped**. A stack's buttons run `docker compose --project-name <project> start`, `stop` or `restart`, so they work without the compose file on hand (including on a remote context); they start the stack's existing containers rather than recreating them like `up` would. The settings let you pick the Docker context (e.g. a Podman machine or remote host), how often to check (default every 15 seconds), which states get a badge, the badge style and colours, and whether to notify you when a container fails or becomes unhealthy.
 
+A container killed for running out of memory counts as **failed** ("OOM killed"), not stopped. Hover a problem container to see why: an unhealthy container's last health-check output, a failed one's error and exit code, or how often a restarting one has restarted; notifications include the same reason. The popup's footer shows how much disk space Docker uses and how much you could reclaim (build cache, images, volumes), and a stack's header links to its Compose project folder.
+
 ### Bugsink Status
 
 Error tracking from a [Bugsink](https://www.bugsink.com/) server: badges for new (first seen in the last 24 hours), open, muted and resolved issues. Click for the open issues grouped by project. Click an issue to open it in Bugsink, or resolve or mute it from the popup:
@@ -69,6 +77,8 @@ Error tracking from a [Bugsink](https://www.bugsink.com/) server: badges for new
 <img src="screenshots/bugsinkstatus-popup.png" width="468" alt="Bugsink Status popup: open issues grouped by project with error type and message, events and last seen, and resolve and mute buttons">
 
 Muted and resolved badges are off by default; switch them on under **Show badges**. Bugsink's API can't filter issues by status, so the widget reads each project's most recently seen issues (10 pages by default, adjustable) to count them.
+
+An issue that was resolved and comes back is tagged **regressed** and gets its own notification. Issues that received new events since the last check show "+12 new" and move up, and each issue shows its short id (e.g. SHOP-42) and, for new issues, when it was first seen.
 
 ### Sentry Status
 
@@ -80,6 +90,8 @@ The same idea for [Sentry](https://sentry.io/), on sentry.io or your own server:
 
 Archived and resolved badges are off by default; switch them on under **Show badges**. The counts come from Sentry's search and cover issues seen in the last 90 days. The popup lists the 100 most recently seen unresolved issues; you can raise that under **General**.
 
+Each issue's dot is coloured by its level (fatal, error, warning, info), and rows show how many events it had in the last 24 hours, whether it's unhandled and who it's assigned to. A resolved issue that comes back is tagged **regressed** and notifies you; an optional badge counts regressed issues. Under **General** you can count only errors and fatals, only error issues (not performance or cron), or only one environment such as production.
+
 ### Dokploy Status
 
 Deployments from a [Dokploy](https://dokploy.com/) server: badges for failed, deploying, deployed and idle services, counting applications, Compose stacks and databases. Click for every service grouped by project and environment. Click a service to open it in Dokploy, or deploy, start or stop it from the popup:
@@ -89,6 +101,8 @@ Deployments from a [Dokploy](https://dokploy.com/) server: badges for failed, de
 <img src="screenshots/dokploystatus-popup.png" width="468" alt="Dokploy Status popup: services grouped by project and environment with type and status, deploy and stop buttons, and a spinner on the one that is deploying">
 
 While something is deploying, the widget checks every few seconds so you see the result straight away, and it notifies you when a deployment fails.
+
+Each application and Compose stack shows its last deployment ("deployed 2 h ago · 1m 32s · Fix login (abc1234)"), and a failed one shows why, also in the notification. Database rows show their backup status (last backup, or a failed backup, which also notifies you). libSQL databases are included, and rows name their server when you deploy to more than one. "Deployed" is the result of the last deployment, not a live health check of the running container.
 
 ### Runner Status
 
@@ -104,6 +118,8 @@ Local LLMs (Ollama, MLX) that the dashboard reports are shown by the [LLM Status
 
 If the dashboard reports scheduled jobs (LaunchAgents that run on a schedule, such as a nightly backup), the popup gains a **Scheduled jobs** section: each job's schedule, when it last ran, when it runs next and the newest line of its log. While a job has failed (its last exit code isn't 0) or missed a scheduled run, the panel shows a red badge with the number of such jobs, and you get a notification when a job starts failing or fails again on a later run. Both can be turned off under **General**.
 
+A running job shows how long that job usually takes and turns amber when it runs far longer (optionally with a notification). Under the job you see its run number, branch, trigger and who started it. An offline runner says why ("service not loaded", or crashed with its exit code). The host line shows load per CPU core and turns red when free disk drops below 10% (with a notification), each runner shows the size of its work folder and its recent results ("9/10 passed"), and warnings count only the last 24 hours, with the newest one shown.
+
 ### LLM Status
 
 Local LLMs at a glance. By default it talks to the Ollama server on this computer (`http://localhost:11434`; set another address under **General**) and reads this computer's GPU load through `nvidia-smi` or, for AMD cards, the kernel's counters. The panel shows two badges:
@@ -118,6 +134,8 @@ Click for the server's version and address, each loaded model's size, how much o
 <img src="screenshots/llmstatus-popup.png" width="436" alt="LLM Status popup: Ollama 0.34.1 up on localhost with 13 models installed, no model loaded, the installed models collapsed, and the GPU's load and memory along the bottom">
 
 Under **General** you can switch the source to a [Mac server dashboard](https://github.com/pless84/mac-server-dashboard) instead: the widget then shows the LLM servers it reports (Ollama and MLX) with the Mac's GPU, RAM and swap use, as Runner Status used to.
+
+Loaded models show their size, quantization and context length ("12.2B · Q4_K_M · ctx 8k") and installed models their size and capabilities. The GPU line shows Ollama's own share of the video memory next to the whole card, plus temperature and power; when a model doesn't fit on the GPU, it lists which other programs use GPU memory. The status only turns busy while a model is loaded, so a game or video on the same GPU doesn't count, and a model shows "in use" right after it served a request.
 
 ## Install
 
