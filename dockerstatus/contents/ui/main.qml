@@ -30,6 +30,16 @@ PlasmoidItem {
     property bool loaded: false
     // Images from images.sh (see Logic.parseImages), when the Images section is switched on.
     property var images: []
+    // Disk use lines from df.sh (see Logic.diskSummary); read when the popup opens, at most every 10 minutes.
+    property var diskUsage: []
+    property double diskChecked: 0
+    // The df command that belongs to the current context (an answer to any other one is out of date).
+    property string diskSource: ""
+    // The containers from the last ps while inspect.sh runs for the problem ones, and the inspect
+    // command that belongs to them (an answer to any other one is out of date).
+    property var pendingList: null
+    property string inspectSource: ""
+    property int inspectCount: 0
     // The destructive action waiting for its second click ("down:<project>", "rmi:<image id>"), or "".
     property string armedAction: ""
     property date lastChecked
@@ -78,6 +88,70 @@ PlasmoidItem {
         }
     }
 
+    // Reads docker system df, unless it was read less than 10 minutes ago.
+    function refreshDisk() {
+        if (Date.now() - diskChecked < 600000) {
+            return
+        }
+        diskChecked = Date.now()
+        diskSource = "sh " + Logic.shellQuote(codeDir + "df.sh") + " " + Logic.shellQuote(dockerContext) + " #" + diskChecked
+        diskFetcher.connectSource(diskSource)
+    }
+
+    // "Build cache 11.5 GB (10 GB reclaimable) · Images 7.1 GB reclaimable · Volumes 633 MB reclaimable"
+    readonly property string diskText: diskUsage.map(d => {
+        switch (d.key) {
+        case "buildCache": return d.reclaimable ? i18n("Build cache %1 (%2 reclaimable)", d.size, d.reclaimable) : i18n("Build cache %1", d.size)
+        case "images": return i18n("Images %1 reclaimable", d.reclaimable)
+        default: return i18n("Volumes %1 reclaimable", d.reclaimable)
+        }
+    }).join(" · ")
+
+    // Why a failed, unhealthy or restarting container is that way, from docker inspect; "" when unknown.
+    function whyText(c) {
+        const w = c.why
+        if (!w) {
+            return ""
+        }
+        const code = c.exitCode !== null && c.exitCode !== undefined ? c.exitCode : null
+        switch (c.stateKey) {
+        case "failed":
+            if (w.oom) {
+                return code !== null ? i18n("OOM killed (exit code %1)", code) : i18n("OOM killed")
+            }
+            return w.error ? (code !== null ? i18n("%1 (exit code %2)", w.error, code) : w.error) : ""
+        case "unhealthy":
+            return w.health
+        case "restarting": {
+            const restarted = w.restarts > 0 ? i18np("restarted %1×", "restarted %1×", w.restarts) : ""
+            return [w.oom ? i18n("OOM killed") : "", restarted].filter(t => t).join(", ")
+        }
+        default:
+            return ""
+        }
+    }
+
+    // The row tooltip: name, status, why, age, networks, mounts and writable size.
+    function containerTooltip(c) {
+        const mountLimit = 4
+        const lines = [c.fullName, c.status, whyText(c)]
+        if (c.age || c.created) {
+            lines.push(i18n("Created %1", [c.age, c.created ? "(" + c.created + ")" : ""].filter(t => t).join(" ")))
+        }
+        if (c.networks.length > 0) {
+            lines.push(i18n("Networks: %1", c.networks.join(", ")))
+        }
+        if (c.mounts.length > 0) {
+            const more = c.mounts.length - mountLimit
+            lines.push(i18n("Mounts: %1", c.mounts.slice(0, mountLimit).join(", ")
+                + (more > 0 ? " " + i18np("+%1 more", "+%1 more", more) : "")))
+        }
+        if (c.writableSize) {
+            lines.push(i18n("Writable layer: %1", c.writableSize))
+        }
+        return lines.filter(t => t).join("\n")
+    }
+
     // The first click on a destructive button arms it; a second click within 5 seconds runs it.
     function arm(key) {
         armedAction = key
@@ -110,8 +184,24 @@ PlasmoidItem {
             action + " --project " + Logic.shellQuote(group.project))
     }
 
+    // Parses ps and, when some containers are in a bad state, asks docker inspect why before showing
+    // them (so the notification can say why too).
     function apply(stdout) {
         const list = Logic.parseContainers(stdout)
+        const ids = Logic.inspectIds(list)
+        if (ids.length === 0) {
+            inspectSource = ""
+            pendingList = null
+            showContainers(list)
+            return
+        }
+        pendingList = list
+        inspectSource = "sh " + Logic.shellQuote(codeDir + "inspect.sh") + " " + Logic.shellQuote(dockerContext) + " "
+            + ids.map(Logic.shellQuote).join(" ") + " #" + (++inspectCount)
+        inspector.connectSource(inspectSource)
+    }
+
+    function showContainers(list) {
         containers = list
         stateCounts = Logic.countStates(list)
         loaded = true
@@ -129,10 +219,10 @@ PlasmoidItem {
         const describe = c => i18n("%1 is %2", c.fullName, stateOf(c.stateKey).label.toLowerCase())
         if (fresh.length === 1) {
             problemNotification.title = i18n("Docker: %1", describe(fresh[0]))
-            problemNotification.text = fresh[0].status
+            problemNotification.text = whyText(fresh[0]) || fresh[0].status
         } else {
             problemNotification.title = i18np("Docker: %1 container needs attention", "Docker: %1 containers need attention", fresh.length)
-            problemNotification.text = fresh.slice(0, 4).map(describe).join("\n")
+            problemNotification.text = fresh.slice(0, 4).map(c => [describe(c), whyText(c)].filter(t => t).join(": ")).join("\n")
         }
         problemNotification.sendEvent()
     }
@@ -141,10 +231,24 @@ PlasmoidItem {
         loaded = false
         containers = []
         images = []
+        diskUsage = []
+        diskChecked = 0
+        diskSource = ""
+        pendingList = null
+        inspectSource = ""
         stateCounts = {}
         previousStates = null
         errorText = ""
         refresh()
+        if (expanded) {
+            refreshDisk()
+        }
+    }
+
+    onExpandedChanged: {
+        if (expanded) {
+            refreshDisk()
+        }
     }
 
     P5Support.DataSource {
@@ -182,6 +286,54 @@ PlasmoidItem {
                 } catch (e) {
                     root.images = []
                 }
+            }
+        }
+    }
+
+    P5Support.DataSource {
+        id: inspector
+        engine: "executable"
+        connectedSources: []
+
+        // inspect.sh is extra: when it fails (or a container is gone by now), the containers are
+        // shown with whatever it did print, or as ps classified them.
+        onNewData: (sourceName, data) => {
+            disconnectSource(sourceName)
+            if (sourceName !== root.inspectSource || root.pendingList === null) {
+                return
+            }
+            let details = {}
+            try {
+                details = Logic.parseInspect(data["stdout"])
+            } catch (e) {
+                // no details: ps-only, or what the last check knew
+            }
+            const list = Logic.mergeInspect(root.pendingList, details, root.containers)
+            root.inspectSource = ""
+            root.pendingList = null
+            root.showContainers(list)
+        }
+    }
+
+    P5Support.DataSource {
+        id: diskFetcher
+        engine: "executable"
+        connectedSources: []
+
+        // The disk use is extra: if it fails, the line stays as it was and the next open tries again.
+        onNewData: (sourceName, data) => {
+            disconnectSource(sourceName)
+            if (sourceName !== root.diskSource) {
+                return
+            }
+            if (data["exit code"] !== 0) {
+                root.diskChecked = 0
+                return
+            }
+            try {
+                root.diskUsage = Logic.diskSummary(data["stdout"])
+            } catch (e) {
+                root.diskChecked = 0
             }
         }
     }
@@ -491,7 +643,7 @@ PlasmoidItem {
         Layout.fillWidth: true
         hoverEnabled: true
 
-        PlasmaComponents.ToolTip.text: container.fullName + "\n" + container.status
+        PlasmaComponents.ToolTip.text: root.containerTooltip(container)
         PlasmaComponents.ToolTip.visible: hovered
         PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
 
@@ -636,6 +788,18 @@ PlasmoidItem {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
                 Layout.margins: Kirigami.Units.smallSpacing
+                Layout.bottomMargin: 0
+                visible: root.diskText !== ""
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+                wrapMode: Text.WordWrap
+                text: root.diskText
+            }
+
+            PlasmaComponents.Label {
+                textFormat: Text.PlainText
+                Layout.fillWidth: true
+                Layout.margins: Kirigami.Units.smallSpacing
                 opacity: 0.7
                 font: Kirigami.Theme.smallFont
                 elide: Text.ElideRight
@@ -701,12 +865,26 @@ PlasmoidItem {
 
                             text: i18n("%1 (%2)", group.modelData.project || i18n("Standalone containers"),
                                        group.modelData.containers.length)
+                            PlasmaComponents.ToolTip.text: group.modelData.workingDir
+                                ? i18n("Project folder: %1", group.modelData.workingDir) : ""
+                            PlasmaComponents.ToolTip.visible: hovered && group.modelData.workingDir !== ""
+                            PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
 
                             PlasmaComponents.BusyIndicator {
                                 Layout.preferredWidth: Kirigami.Units.iconSizes.small
                                 Layout.preferredHeight: Kirigami.Units.iconSizes.small
                                 visible: header.busy
                                 running: visible
+                            }
+                            // The folder is on the docker host, so it can only be opened here without a docker context.
+                            PlasmaComponents.ToolButton {
+                                visible: header.isStack && group.modelData.workingDir !== "" && root.dockerContext === ""
+                                icon.name: "folder-open"
+                                display: PlasmaComponents.AbstractButton.IconOnly
+                                text: i18n("Open folder")
+                                onClicked: Qt.openUrlExternally(Logic.fileUrl(group.modelData.workingDir))
+                                PlasmaComponents.ToolTip.text: text
+                                PlasmaComponents.ToolTip.visible: hovered
                             }
                             PlasmaComponents.ToolButton {
                                 visible: header.isStack && !header.busy && header.stackActions.start

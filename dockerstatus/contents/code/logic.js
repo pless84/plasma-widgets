@@ -16,6 +16,12 @@ function label(labels, key) {
     return match ? match[1] : ""
 }
 
+// The exit code in a ps Status like "Exited (137) 3 minutes ago", or null.
+function exitCodeOf(status) {
+    const exit = /Exited \((\d+)\)/.exec(status || "")
+    return exit ? parseInt(exit[1]) : null
+}
+
 // A container from `docker ps --format '{{json .}}'` -> failed | unhealthy | restarting | paused | stopped | running
 function classify(c) {
     switch (c.State) {
@@ -25,8 +31,8 @@ function classify(c) {
         return c.HealthStatus === "unhealthy" || /\(unhealthy\)/.test(c.Status) ? "unhealthy" : "running"
     case "dead": return "failed"
     case "exited": {
-        const exit = /Exited \((\d+)\)/.exec(c.Status)
-        return exit && !stoppedExitCodes.includes(parseInt(exit[1])) ? "failed" : "stopped"
+        const code = exitCodeOf(c.Status)
+        return code !== null && !stoppedExitCodes.includes(code) ? "failed" : "stopped"
     }
     default: return "stopped" // created, removing
     }
@@ -48,7 +54,20 @@ function shortImage(image) {
     return image.startsWith("sha256:") ? image.slice(7, 19) : image
 }
 
-// fetch.sh's output (one JSON object per line) -> [{id, name, fullName, project, image, imageRef, stateKey, status, ports}]
+// "a,b,,c" -> ["a", "b", "c"]
+function splitList(s) {
+    return (s || "").split(",").map(t => t.trim()).filter(t => t)
+}
+
+// ps CreatedAt "2026-10-09 07:57:56 +0200 CEST" -> "2026-10-09 07:57"
+function shortDate(createdAt) {
+    const m = /^(\d{4}-\d\d-\d\d \d\d:\d\d)/.exec(createdAt || "")
+    return m ? m[1] : ""
+}
+
+// fetch.sh's output (one JSON object per line) -> [{id, name, fullName, project, workingDir, image, imageRef,
+// stateKey, status, exitCode, ports, age, created, networks, mounts, writableSize, why}]
+// `why` is filled in from inspect.sh by mergeInspect, for the containers inspectIds picks.
 function parseContainers(stdout) {
     return stdout.split("\n").filter(line => line.trim()).map(line => JSON.parse(line)).map(c => ({
         id: c.ID,
@@ -61,6 +80,16 @@ function parseContainers(stdout) {
         stateKey: classify(c),
         status: c.Status,
         ports: shortPorts(c.Ports),
+        workingDir: label(c.Labels, "com.docker.compose.project.working_dir"),
+        exitCode: exitCodeOf(c.Status),
+        // How long ago it was created ("11 days ago"), separate from the uptime in `status`.
+        age: c.RunningFor || "",
+        created: shortDate(c.CreatedAt),
+        networks: splitList(c.Networks),
+        mounts: splitList(c.Mounts),
+        // The writable layer ("4.1kB" of "4.1kB (virtual 174MB)").
+        writableSize: (c.Size || "").split(" (")[0],
+        why: null,
     }))
 }
 
@@ -79,6 +108,7 @@ function groupContainers(containers, order) {
         .sort((a, b) => (a === "") - (b === "") || a.localeCompare(b))
         .map(project => ({
             project: project,
+            workingDir: byProject[project].map(c => c.workingDir).find(d => d) || "",
             containers: byProject[project].sort((a, b) =>
                 order.indexOf(a.stateKey) - order.indexOf(b.stateKey) || a.name.localeCompare(b.name))
         }))
@@ -107,6 +137,101 @@ function freshProblems(containers, previousStates) {
     const states = {}
     containers.forEach(c => states[c.id] = c.stateKey)
     return { fresh: fresh, states: states }
+}
+
+// ---- Why a container is in a bad state (docker inspect) ----
+
+// The ids worth inspecting: failed, unhealthy and restarting containers, and those stopped with
+// exit code 137, which may have been killed for running out of memory. Inspecting only these keeps polls cheap.
+function inspectIds(containers) {
+    return containers
+        .filter(c => c.stateKey === "failed" || c.stateKey === "unhealthy" || c.stateKey === "restarting"
+                     || (c.stateKey === "stopped" && c.exitCode === 137))
+        .map(c => c.id)
+}
+
+// inspect.sh's output (one JSON object per line: {id, restarts, state}) -> {id: {oom, error, exitCode, restarts, health}}
+// `health` is the last health check's output on one line. Lines that don't parse are skipped.
+function parseInspect(stdout) {
+    const details = {}
+    stdout.split("\n").filter(line => line.trim()).forEach(line => {
+        let o
+        try {
+            o = JSON.parse(line)
+        } catch (e) {
+            return
+        }
+        const state = o.state || {}
+        const log = state.Health && state.Health.Log ? state.Health.Log : []
+        let health = log.length > 0 ? String(log[log.length - 1].Output || "").replace(/\s+/g, " ").trim() : ""
+        if (health.length > 200) health = health.slice(0, 199) + "…"
+        details[o.id] = {
+            oom: state.OOMKilled === true,
+            error: String(state.Error || "").replace(/\s+/g, " ").trim(),
+            exitCode: typeof state.ExitCode === "number" ? state.ExitCode : null,
+            restarts: o.restarts || 0,
+            health: health,
+        }
+    })
+    return details
+}
+
+// The containers with their inspect details in `why`. One that was killed for running out of
+// memory counts as failed, not stopped. When inspect gave nothing for a container that would have
+// been inspected, the details from `previous` (the containers shown at the last check) are carried
+// forward, so an OOM kill is not forgotten (and notified again) because one inspect call failed.
+function mergeInspect(containers, details, previous) {
+    const before = {}
+    ;(previous || []).forEach(c => before[c.id] = c)
+    return containers.map(c => {
+        let d = details[c.id]
+        if (!d && before[c.id] && before[c.id].why && inspectIds([c]).length > 0) d = before[c.id].why
+        if (!d) return c
+        const oomKilled = d.oom && (c.stateKey === "stopped" || c.stateKey === "failed")
+        return Object.assign({}, c, {
+            stateKey: oomKilled ? "failed" : c.stateKey,
+            exitCode: d.exitCode !== null ? d.exitCode : c.exitCode,
+            why: d,
+        })
+    })
+}
+
+// A file:// URL for a local path; encodeURI leaves # and ? alone, which would cut the path short.
+function fileUrl(path) {
+    return "file://" + encodeURI(path).replace(/#/g, "%23").replace(/\?/g, "%3F")
+}
+
+// ---- Disk use (docker system df) ----
+
+// "11.54GB" -> "11.5 GB", "632.9MB (83%)" -> "633 MB", "" when it isn't a size.
+function formatSize(s) {
+    const m = /^([\d.]+)\s*([kKMGTP]?i?B)/.exec(s || "")
+    if (!m) return ""
+    const n = parseFloat(m[1])
+    return (n >= 100 ? String(Math.round(n)) : n.toFixed(1).replace(/\.0$/, "")) + " " + m[2]
+}
+
+function isZeroSize(s) {
+    return !(parseFloat(s) > 0)
+}
+
+// df.sh's output (one JSON object per line) -> [{key, size, reclaimable}] for what is worth a line:
+// the build cache (key "buildCache", when it is not empty), and images and volumes ("images", "volumes")
+// that have something reclaimable. Sizes are formatted; `reclaimable` is "" when there is none.
+function diskSummary(stdout) {
+    const rows = {}
+    stdout.split("\n").filter(line => line.trim()).forEach(line => {
+        const r = JSON.parse(line)
+        rows[r.Type] = { size: formatSize(r.Size), reclaimable: isZeroSize(r.Reclaimable) ? "" : formatSize(r.Reclaimable) }
+    })
+    const out = []
+    const cache = rows["Build Cache"]
+    if (cache && !isZeroSize(cache.size)) out.push({ key: "buildCache", size: cache.size, reclaimable: cache.reclaimable })
+    const images = rows["Images"]
+    if (images && images.reclaimable) out.push({ key: "images", size: images.size, reclaimable: images.reclaimable })
+    const volumes = rows["Local Volumes"]
+    if (volumes && volumes.reclaimable) out.push({ key: "volumes", size: volumes.size, reclaimable: volumes.reclaimable })
+    return out
 }
 
 // The badge states to show: those switched on in the settings (st.inPanel) with containers in

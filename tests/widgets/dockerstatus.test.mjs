@@ -53,7 +53,9 @@ test("shortImage shortens image ids only", () => {
 
 const ps = [
     { ID: "a1", Names: "shop-web-1", State: "running", Status: "Up 1 hour", Image: "nginx:1.27",
-      Labels: "com.docker.compose.project=shop,com.docker.compose.service=web", Ports: "0.0.0.0:8080->80/tcp" },
+      Labels: "com.docker.compose.project=shop,com.docker.compose.service=web,com.docker.compose.project.working_dir=/srv/shop",
+      Ports: "0.0.0.0:8080->80/tcp", RunningFor: "2 days ago", CreatedAt: "2026-10-09 07:57:56 +0200 CEST",
+      Networks: "shop_default,edge", Mounts: "/srv/shop/src,shop_data", Size: "4.1kB (virtual 174MB)" },
     { ID: "a2", Names: "shop-db-1", State: "exited", Status: "Exited (1) 2 minutes ago", Image: "postgres:17",
       Labels: "com.docker.compose.project=shop,com.docker.compose.service=db", Ports: "" },
     { ID: "a3", Names: "shop-api-1", State: "running", Status: "Up 1 hour", Image: "api:1",
@@ -68,7 +70,10 @@ test("parseContainers reads fetch.sh's JSON lines", () => {
     const containers = L.parseContainers(ps)
     assert.equal(containers.length, 5)
     assert.deepEqual(containers[0], { id: "a1", name: "web", fullName: "shop-web-1", project: "shop", image: "nginx:1.27",
-                                      imageRef: "nginx:1.27", stateKey: "running", status: "Up 1 hour", ports: "8080→80" })
+                                      imageRef: "nginx:1.27", stateKey: "running", status: "Up 1 hour", ports: "8080→80",
+                                      workingDir: "/srv/shop", exitCode: null, age: "2 days ago", created: "2026-10-09 07:57",
+                                      networks: ["shop_default", "edge"], mounts: ["/srv/shop/src", "shop_data"],
+                                      writableSize: "4.1kB", why: null })
     assert.equal(containers[3].name, "scratch")       // no compose service: the container name
     assert.equal(containers[3].project, "")
     assert.equal(containers[3].image, "0123456789ab")
@@ -162,4 +167,102 @@ test("imageUsers: matches a container's image by tag, implied latest, registry p
     assert.deepEqual(L.imageUsers(byRef("api:latest"), more).map(c => c.id), ["x1"])
     assert.deepEqual(L.imageUsers(byRef("nginx:1.27"), more).map(c => c.id), ["x2"])
     assert.deepEqual(L.imageUsers(byRef("ghcr.io/pless84/tool:2"), more).map(c => c.id), ["x3"])
+})
+
+test("exit codes and group folders", () => {
+    assert.equal(L.exitCodeOf("Exited (137) 3 minutes ago"), 137)
+    assert.equal(L.exitCodeOf("Up 2 hours"), null)
+    const groups = L.groupContainers(L.parseContainers(ps), ORDER)
+    assert.equal(groups.find(g => g.project === "shop").workingDir, "/srv/shop")
+    assert.equal(groups.find(g => g.project === "api").workingDir, "")
+    assert.equal(L.label("a=1,com.docker.compose.project.working_dir=/x y,b=2", "com.docker.compose.project.working_dir"), "/x y")
+})
+
+test("inspectIds: problem containers and 137 exits only", () => {
+    const c = (id, stateKey, exitCode = null) => ({ id, stateKey, exitCode })
+    assert.deepEqual(L.inspectIds([c("a", "running"), c("b", "failed", 1), c("c", "unhealthy"), c("d", "restarting"),
+                                   c("e", "stopped", 137), c("f", "stopped", 0), c("g", "paused"), c("h", "running", null)]),
+        ["b", "c", "d", "e"])
+})
+
+const inspect = [
+    { id: "o1", restarts: 0, state: { OOMKilled: true, ExitCode: 137, Error: "" } },
+    { id: "o2", restarts: 3, state: { OOMKilled: false, ExitCode: 1, Error: "cannot start\nnow" } },
+    { id: "o3", restarts: 0, state: { Health: { Log: [{ Output: "old" }, { Output: "  curl: (7) refused\n  \n" }] } } },
+    { id: "o4", restarts: 2, state: { OOMKilled: false, ExitCode: 137 } },
+].map(o => JSON.stringify(o)).join("\n") + "\nnot json\n"
+
+test("parseInspect", () => {
+    const d = L.parseInspect(inspect)
+    assert.deepEqual(d.o1, { oom: true, error: "", exitCode: 137, restarts: 0, health: "" })
+    assert.deepEqual(d.o2, { oom: false, error: "cannot start now", exitCode: 1, restarts: 3, health: "" })
+    assert.equal(d.o3.health, "curl: (7) refused")
+    assert.equal(d.o3.exitCode, null)
+    const long = L.parseInspect(JSON.stringify({ id: "x", state: { Health: { Log: [{ Output: "z".repeat(500) }] } } }))
+    assert.equal(long.x.health.length, 200)
+    assert.deepEqual(L.parseInspect(""), {})
+})
+
+test("mergeInspect: an OOM kill is failed, not stopped", () => {
+    const c = (id, stateKey, exitCode = null) => ({ id, stateKey, exitCode, why: null })
+    const merged = L.mergeInspect([c("o1", "stopped", 137), c("o2", "failed", 1), c("o3", "unhealthy"),
+                                   c("o4", "stopped", 137), c("zz", "running")], L.parseInspect(inspect))
+    assert.deepEqual(merged.map(m => m.stateKey), ["failed", "failed", "unhealthy", "stopped", "running"])
+    assert.equal(merged[0].why.oom, true)
+    assert.equal(merged[2].why.health, "curl: (7) refused")
+    assert.equal(merged[2].exitCode, null)
+    assert.equal(merged[4].why, null)
+    // The input isn't changed.
+    assert.equal(L.mergeInspect([c("o1", "stopped", 137)], L.parseInspect(inspect))[0].stateKey, "failed")
+    // Merging makes the OOM kill a fresh problem.
+    const before = L.freshProblems([c("o1", "stopped", 137)], null).states
+    assert.deepEqual(L.freshProblems(merged, before).fresh.map(m => m.id), ["o1", "o2", "o3"])
+})
+
+test("formatSize", () => {
+    assert.equal(L.formatSize("11.54GB"), "11.5 GB")
+    assert.equal(L.formatSize("10.04GB"), "10 GB")
+    assert.equal(L.formatSize("632.9MB (83%)"), "633 MB")
+    assert.equal(L.formatSize("7.131GB (80%)"), "7.1 GB")
+    assert.equal(L.formatSize("4.1kB"), "4.1 kB")
+    assert.equal(L.formatSize("0B"), "0 B")
+    assert.equal(L.formatSize(""), "")
+})
+
+test("diskSummary", () => {
+    const df = [
+        { Active: "3", Reclaimable: "7.131GB (80%)", Size: "8.866GB", TotalCount: "4", Type: "Images" },
+        { Active: "4", Reclaimable: "0B (0%)", Size: "5.018MB", TotalCount: "4", Type: "Containers" },
+        { Active: "2", Reclaimable: "632.9MB (83%)", Size: "758.2MB", TotalCount: "9", Type: "Local Volumes" },
+        { Active: "0", Reclaimable: "10.04GB", Size: "11.54GB", TotalCount: "384", Type: "Build Cache" },
+    ].map(r => JSON.stringify(r)).join("\n") + "\n"
+    assert.deepEqual(L.diskSummary(df), [
+        { key: "buildCache", size: "11.5 GB", reclaimable: "10 GB" },
+        { key: "images", size: "8.9 GB", reclaimable: "7.1 GB" },
+        { key: "volumes", size: "758 MB", reclaimable: "633 MB" },
+    ])
+    const clean = [
+        { Reclaimable: "0B (0%)", Size: "1GB", Type: "Images" },
+        { Reclaimable: "0B", Size: "0B", Type: "Build Cache" },
+    ].map(r => JSON.stringify(r)).join("\n")
+    assert.deepEqual(L.diskSummary(clean), [])
+    assert.deepEqual(L.diskSummary(""), [])
+})
+
+test("mergeInspect carries the previous details forward when inspect gives none", () => {
+    const c = (id, stateKey, exitCode = null) => ({ id, stateKey, exitCode, why: null })
+    const shown = L.mergeInspect([c("o1", "stopped", 137)], L.parseInspect(inspect), [])
+    assert.equal(shown[0].stateKey, "failed")
+    // The next inspect fails: still failed with the same details, so it is not a fresh problem again.
+    const again = L.mergeInspect([c("o1", "stopped", 137)], {}, shown)
+    assert.equal(again[0].stateKey, "failed")
+    assert.equal(again[0].why.oom, true)
+    assert.deepEqual(L.freshProblems(again, L.freshProblems(shown, null).states).fresh, [])
+    // Another container, or one that no longer needs inspecting, gets nothing carried over.
+    assert.equal(L.mergeInspect([c("other", "stopped", 137)], {}, shown)[0].why, null)
+    assert.equal(L.mergeInspect([c("o1", "running")], {}, shown)[0].why, null)
+})
+
+test("fileUrl escapes # and ?", () => {
+    assert.equal(L.fileUrl("/home/jap/my stack/a#b?c"), "file:///home/jap/my%20stack/a%23b%3Fc")
 })
