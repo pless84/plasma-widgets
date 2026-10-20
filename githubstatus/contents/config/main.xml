@@ -52,6 +52,10 @@
     </entry>
   </group>
   <group name="Appearance">
+    <entry name="useSharedLook" type="Bool">
+      <label>Follow the shared look (same for all madebypless widgets) instead of this widget's own appearance settings, once a shared look has been saved</label>
+      <default>true</default>
+    </entry>
     <entry name="showLogo" type="Bool">
       <label>Show a logo in front of the badges in the panel</label>
       <default>false</default>

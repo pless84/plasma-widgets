@@ -223,3 +223,12 @@ function jobChanges(jobs, previous) {
 function toggled(list, key) {
     return list.includes(key) ? list.filter(k => k !== key) : list.concat([key])
 }
+
+// Which shared look colour role (see look.js) each colour setting follows when the widget
+// uses the shared look.
+var colorRoles = {
+    colorOffline: "error",
+    colorBusy: "active",
+    colorIdle: "ok",
+    colorCountBackground: "countBackground"
+}

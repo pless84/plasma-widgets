@@ -8,6 +8,7 @@ import org.kde.plasma.extras as PlasmaExtras
 import org.kde.kirigami as Kirigami
 import org.kde.notification
 import "../code/logic.js" as Logic
+import "../code/look.js" as Look
 
 PlasmoidItem {
     id: root
@@ -30,15 +31,15 @@ PlasmoidItem {
     // Component states in panel order, worst first. Colours come from the Appearance settings and
     // default to githubstatus.com's own; "glyph" is the square style's symbol, "roundGlyph" the rounded one's.
     readonly property var componentStates: [
-        { key: "major_outage", label: i18n("Major outage"), glyph: "cross", roundGlyph: "cross", color: Plasmoid.configuration.colorMajorOutage,
+        { key: "major_outage", label: i18n("Major outage"), glyph: "cross", roundGlyph: "cross", color: root.look.colors.colorMajorOutage,
           inPanel: Plasmoid.configuration.showMajorOutageInPanel },
-        { key: "partial_outage", label: i18n("Partial outage"), glyph: "exclamation", roundGlyph: "exclamation", color: Plasmoid.configuration.colorPartialOutage,
+        { key: "partial_outage", label: i18n("Partial outage"), glyph: "exclamation", roundGlyph: "exclamation", color: root.look.colors.colorPartialOutage,
           inPanel: Plasmoid.configuration.showPartialOutageInPanel },
-        { key: "degraded_performance", label: i18n("Degraded performance"), glyph: "wave", roundGlyph: "wave", color: Plasmoid.configuration.colorDegraded,
+        { key: "degraded_performance", label: i18n("Degraded performance"), glyph: "wave", roundGlyph: "wave", color: root.look.colors.colorDegraded,
           inPanel: Plasmoid.configuration.showDegradedInPanel },
-        { key: "under_maintenance", label: i18n("Under maintenance"), glyph: "gear", roundGlyph: "gear", color: Plasmoid.configuration.colorMaintenance,
+        { key: "under_maintenance", label: i18n("Under maintenance"), glyph: "gear", roundGlyph: "gear", color: root.look.colors.colorMaintenance,
           inPanel: Plasmoid.configuration.showMaintenanceInPanel },
-        { key: "operational", label: i18n("Operational"), glyph: "check", roundGlyph: "check", color: Plasmoid.configuration.colorOperational,
+        { key: "operational", label: i18n("Operational"), glyph: "check", roundGlyph: "check", color: root.look.colors.colorOperational,
           inPanel: Plasmoid.configuration.showOperationalInPanel },
     ]
     readonly property var stateCounts: Logic.countStates(components)
@@ -46,7 +47,7 @@ PlasmoidItem {
     // Badges (in the panel, the popup and on the desktop) show the states switched on in the
     // settings, optionally including empty ones.
     readonly property var panelStates: Logic.panelStates(componentStates, stateCounts, Plasmoid.configuration.showZeroInPanel)
-    readonly property bool badgeMode: Plasmoid.configuration.badgeStyle !== "dot"
+    readonly property bool badgeMode: root.look.badgeStyle !== "dot"
 
     // White or near-black, whichever reads better on the given background colour.
     function contrastText(background) {
@@ -56,11 +57,11 @@ PlasmoidItem {
 
     function indicatorColor(ind) {
         switch (ind) {
-        case "none": return Plasmoid.configuration.colorOperational
-        case "minor": return Plasmoid.configuration.colorDegraded
-        case "major": return Plasmoid.configuration.colorPartialOutage
-        case "critical": return Plasmoid.configuration.colorMajorOutage
-        case "maintenance": return Plasmoid.configuration.colorMaintenance
+        case "none": return root.look.colors.colorOperational
+        case "minor": return root.look.colors.colorDegraded
+        case "major": return root.look.colors.colorPartialOutage
+        case "critical": return root.look.colors.colorMajorOutage
+        case "maintenance": return root.look.colors.colorMaintenance
         default: return Kirigami.Theme.disabledTextColor
         }
     }
@@ -141,6 +142,15 @@ PlasmoidItem {
             return logo.startsWith("/") ? "file://" + logo : logo.startsWith("file:") ? logo : ""
         }
     }
+
+    // The appearance in use: this widget's own settings, or the shared look that every
+    // madebypless widget can follow (see SharedLook.qml and look.js).
+    SharedLook {
+        id: sharedLook
+    }
+    readonly property var look: Look.resolve(Plasmoid.configuration,
+                                             Plasmoid.configuration.useSharedLook ? sharedLook.values : null,
+                                             Logic.colorRoles)
 
     Plasmoid.status: indicator === "major" || indicator === "critical"
         ? PlasmaCore.Types.NeedsAttentionStatus
@@ -234,12 +244,12 @@ PlasmoidItem {
         property var componentState
         property int count
         property real size
-        readonly property bool rounded: Plasmoid.configuration.badgeStyle === "rounded"
+        readonly property bool rounded: root.look.badgeStyle === "rounded"
 
         implicitHeight: size
         implicitWidth: glyphBlock.width + countLabel.implicitWidth + size * (rounded ? 0.7 : 0.5)
         radius: rounded ? height / 2 : 2
-        color: Plasmoid.configuration.colorCountBackground
+        color: root.look.colors.colorCountBackground
         border.width: rounded ? 1.5 : 1
         border.color: componentState.color
 
@@ -267,7 +277,7 @@ PlasmoidItem {
             anchors.verticalCenter: parent.verticalCenter
             horizontalAlignment: Text.AlignHCenter
             text: count
-            color: root.contrastText(Plasmoid.configuration.colorCountBackground)
+            color: root.contrastText(root.look.colors.colorCountBackground)
             font.pixelSize: parent.size * 0.6
         }
     }
@@ -285,8 +295,8 @@ PlasmoidItem {
         flow: vertical ? GridLayout.TopToBottom : GridLayout.LeftToRight
         rows: vertical ? Math.max(itemCount, 1) : 1
         columns: vertical ? 1 : Math.max(itemCount, 1)
-        rowSpacing: Plasmoid.configuration.badgeSpacing
-        columnSpacing: Plasmoid.configuration.badgeSpacing
+        rowSpacing: root.look.badgeSpacing
+        columnSpacing: root.look.badgeSpacing
 
         // Optional logo in front of the badges (panel only), chosen under Appearance.
         Kirigami.Icon {
@@ -294,8 +304,8 @@ PlasmoidItem {
             Layout.preferredWidth: bar.badgeSize
             Layout.preferredHeight: bar.badgeSize
             // Extra gap after the logo, on top of the badge spacing.
-            Layout.rightMargin: bar.vertical ? 0 : Plasmoid.configuration.logoSpacing
-            Layout.bottomMargin: bar.vertical ? Plasmoid.configuration.logoSpacing : 0
+            Layout.rightMargin: bar.vertical ? 0 : root.look.logoSpacing
+            Layout.bottomMargin: bar.vertical ? root.look.logoSpacing : 0
             source: root.customLogo || Plasmoid.icon
         }
 
@@ -345,7 +355,7 @@ PlasmoidItem {
             visible: compact.showBadges
             badgeStates: root.panelStates
             showTotal: compact.showTotal
-            showLogo: Plasmoid.configuration.showLogo
+            showLogo: root.look.showLogo
             vertical: compact.vertical
             badgeSize: compact.badgeSize
             opacity: root.errorText ? 0.5 : 1
@@ -360,7 +370,7 @@ PlasmoidItem {
 
             Kirigami.Icon {
                 anchors.fill: parent
-                source: Plasmoid.configuration.showLogo && root.customLogo || Plasmoid.icon
+                source: root.look.showLogo && root.customLogo || Plasmoid.icon
                 active: compact.containsMouse
             }
 

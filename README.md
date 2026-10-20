@@ -17,6 +17,8 @@ KDE Plasma 6 widgets for keeping an eye on GitHub, PRTG, Docker, Bugsink, Sentry
 
 Every badge widget offers square or rounded badges, adjustable colours, a choice of which states get a badge, and an optional logo in front of the badges in the panel (any icon, or an image file such as a downloaded logo). Find these under **Appearance** and **General** in the widget's settings.
 
+**Shared look.** To make all the widgets look the same, tick **Look the same as my other madebypless widgets** under **Appearance** (on by default) and change the badge style, spacing, logo or colours there. Applying saves them as the shared look in `~/.config/madebypless-widgets/look.json`, and every widget with the option on follows within a second or two. The shared colours are roles (error, attention, warning, active, info, OK, neutral, count background); each widget's settings page shows which of its states use each role. The logo image stays per widget, and untick the option on a widget to give it its own look again. Until a shared look is saved, every widget keeps its own settings.
+
 ## Screenshots
 
 The screenshots show sample data, apart from GitHub Status, which shows the live public feed.

@@ -91,3 +91,16 @@ function panelStates(states, counts, showZero) {
 function visibleStates(states, counts) {
     return states.filter(st => (counts[st.key] || 0) > 0)
 }
+
+// Which shared look colour role (see look.js) each colour setting follows when the widget
+// uses the shared look.
+var colorRoles = {
+    colorDown: "error",
+    colorAcknowledged: "attention",
+    colorWarning: "warning",
+    colorUnusual: "active",
+    colorPaused: "info",
+    colorUp: "ok",
+    colorUnknown: "neutral",
+    colorCountBackground: "countBackground"
+}

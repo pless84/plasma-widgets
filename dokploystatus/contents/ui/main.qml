@@ -10,6 +10,7 @@ import org.kde.plasma.plasma5support as P5Support
 import org.kde.kirigami as Kirigami
 import org.kde.notification
 import "../code/logic.js" as Logic
+import "../code/look.js" as Look
 
 PlasmoidItem {
     id: root
@@ -32,13 +33,13 @@ PlasmoidItem {
     // running = deployment in progress, done = deployed, idle = never deployed or stopped.
     // Colours come from the Appearance settings.
     readonly property var serviceStates: [
-        { key: "error", label: i18n("Failed"), glyph: "cross", roundGlyph: "cross", color: Plasmoid.configuration.colorFailed,
+        { key: "error", label: i18n("Failed"), glyph: "cross", roundGlyph: "cross", color: root.look.colors.colorFailed,
           inPanel: Plasmoid.configuration.showFailedInPanel },
-        { key: "running", label: i18n("Deploying"), glyph: "restart", roundGlyph: "restart", color: Plasmoid.configuration.colorDeploying,
+        { key: "running", label: i18n("Deploying"), glyph: "restart", roundGlyph: "restart", color: root.look.colors.colorDeploying,
           inPanel: Plasmoid.configuration.showDeployingInPanel },
-        { key: "done", label: i18n("Deployed"), glyph: "check", roundGlyph: "check", color: Plasmoid.configuration.colorDeployed,
+        { key: "done", label: i18n("Deployed"), glyph: "check", roundGlyph: "check", color: root.look.colors.colorDeployed,
           inPanel: Plasmoid.configuration.showDeployedInPanel },
-        { key: "idle", label: i18n("Idle"), glyph: "stop", roundGlyph: "stop", color: Plasmoid.configuration.colorIdle,
+        { key: "idle", label: i18n("Idle"), glyph: "stop", roundGlyph: "stop", color: root.look.colors.colorIdle,
           inPanel: Plasmoid.configuration.showIdleInPanel },
     ]
     readonly property var typeLabels: ({
@@ -195,6 +196,15 @@ PlasmoidItem {
         }
     }
 
+    // The appearance in use: this widget's own settings, or the shared look that every
+    // madebypless widget can follow (see SharedLook.qml and look.js).
+    SharedLook {
+        id: sharedLook
+    }
+    readonly property var look: Look.resolve(Plasmoid.configuration,
+                                             Plasmoid.configuration.useSharedLook ? sharedLook.values : null,
+                                             Logic.colorRoles)
+
     Plasmoid.status: (stateCounts.error || 0) > 0 ? PlasmaCore.Types.NeedsAttentionStatus : PlasmaCore.Types.ActiveStatus
 
     toolTipMainText: i18n("Dokploy")
@@ -280,12 +290,12 @@ PlasmoidItem {
         property var serviceState
         property int count
         property real size
-        readonly property bool rounded: Plasmoid.configuration.badgeStyle === "rounded"
+        readonly property bool rounded: root.look.badgeStyle === "rounded"
 
         implicitHeight: size
         implicitWidth: glyphBlock.width + countLabel.implicitWidth + size * (rounded ? 0.7 : 0.5)
         radius: rounded ? height / 2 : 2
-        color: Plasmoid.configuration.colorCountBackground
+        color: root.look.colors.colorCountBackground
         border.width: rounded ? 1.5 : 1
         border.color: serviceState.color
 
@@ -313,7 +323,7 @@ PlasmoidItem {
             anchors.verticalCenter: parent.verticalCenter
             horizontalAlignment: Text.AlignHCenter
             text: count
-            color: root.contrastText(Plasmoid.configuration.colorCountBackground)
+            color: root.contrastText(root.look.colors.colorCountBackground)
             font.pixelSize: parent.size * 0.6
         }
     }
@@ -331,8 +341,8 @@ PlasmoidItem {
         flow: vertical ? GridLayout.TopToBottom : GridLayout.LeftToRight
         rows: vertical ? Math.max(itemCount, 1) : 1
         columns: vertical ? 1 : Math.max(itemCount, 1)
-        rowSpacing: Plasmoid.configuration.badgeSpacing
-        columnSpacing: Plasmoid.configuration.badgeSpacing
+        rowSpacing: root.look.badgeSpacing
+        columnSpacing: root.look.badgeSpacing
 
         // Optional logo in front of the badges (panel only), chosen under Appearance.
         Kirigami.Icon {
@@ -340,8 +350,8 @@ PlasmoidItem {
             Layout.preferredWidth: bar.badgeSize
             Layout.preferredHeight: bar.badgeSize
             // Extra gap after the logo, on top of the badge spacing.
-            Layout.rightMargin: bar.vertical ? 0 : Plasmoid.configuration.logoSpacing
-            Layout.bottomMargin: bar.vertical ? Plasmoid.configuration.logoSpacing : 0
+            Layout.rightMargin: bar.vertical ? 0 : root.look.logoSpacing
+            Layout.bottomMargin: bar.vertical ? root.look.logoSpacing : 0
             source: root.customLogo || Plasmoid.icon
         }
 
@@ -390,7 +400,7 @@ PlasmoidItem {
             visible: compact.showBadges
             badgeStates: root.panelStates
             showTotal: compact.showTotal
-            showLogo: Plasmoid.configuration.showLogo
+            showLogo: root.look.showLogo
             vertical: compact.vertical
             badgeSize: compact.badgeSize
             opacity: root.errorText ? 0.5 : 1
@@ -402,7 +412,7 @@ PlasmoidItem {
             width: compact.badgeSize
             height: compact.badgeSize
             visible: !compact.showBadges
-            source: Plasmoid.configuration.showLogo && root.customLogo || Plasmoid.icon
+            source: root.look.showLogo && root.customLogo || Plasmoid.icon
             active: compact.containsMouse
             opacity: 0.5
         }

@@ -86,3 +86,13 @@ function visibleStates(states, counts) {
 function toggled(list, key) {
     return list.includes(key) ? list.filter(k => k !== key) : list.concat([key])
 }
+
+// Which shared look colour role (see look.js) each colour setting follows when the widget
+// uses the shared look.
+var colorRoles = {
+    colorNew: "error",
+    colorOpen: "warning",
+    colorArchived: "neutral",
+    colorResolved: "ok",
+    colorCountBackground: "countBackground"
+}
