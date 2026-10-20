@@ -113,6 +113,10 @@ Local LLMs at a glance. By default it talks to the Ollama server on this compute
 
 Click for the server's version and address, each loaded model's size, how much of it sits on the GPU and when it unloads, and the installed models (collapsed by default). The widget checks every 10 seconds and notifies you when the server goes down.
 
+<img src="screenshots/llmstatus-panel.png" width="63" alt="LLM Status in the panel: a green status badge showing 2% GPU load">
+
+<img src="screenshots/llmstatus-popup.png" width="436" alt="LLM Status popup: Ollama 0.34.1 up on localhost with 13 models installed, no model loaded, the installed models collapsed, and the GPU's load and memory along the bottom">
+
 Under **General** you can switch the source to a [Mac server dashboard](https://github.com/pless84/mac-server-dashboard) instead: the widget then shows the LLM servers it reports (Ollama and MLX) with the Mac's GPU, RAM and swap use, as Runner Status used to.
 
 ## Install
@@ -144,6 +148,7 @@ To update after pulling changes, use `-u` instead of `-i`. A widget already on t
 - **Sentry Status:** `python3` and `secret-tool` (libsecret), your organization's slug, and a Sentry personal token with the `event:read` and `event:write` scopes. Create one under User Settings → Personal Tokens, paste it into the widget's settings and click **Save to Keyring**. For an organization in the EU region, set the server to `https://de.sentry.io`.
 - **Dokploy Status:** `python3` and `secret-tool` (libsecret), and a Dokploy API key. Generate one in Dokploy under Settings → Profile → API/CLI, paste it into the widget's settings and click **Save to Keyring**.
 - **Docker Status:** the `docker` CLI with access to the daemon (e.g. your user in the `docker` group). Any `docker context` works, including Podman.
+- **LLM Status:** an Ollama server it can reach over HTTP. For the GPU load, `nvidia-smi` (NVIDIA) or an AMD card with the `amdgpu` driver; without either, the badge shows Up or Down instead.
 
 ## PRTG setup
 
