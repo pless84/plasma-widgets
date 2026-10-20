@@ -396,6 +396,9 @@ PlasmoidItem {
             visible: bar.showLogo
             Layout.preferredWidth: bar.badgeSize
             Layout.preferredHeight: bar.badgeSize
+            // Extra gap after the logo, on top of the badge spacing.
+            Layout.rightMargin: bar.vertical ? 0 : Plasmoid.configuration.logoSpacing
+            Layout.bottomMargin: bar.vertical ? Plasmoid.configuration.logoSpacing : 0
             source: root.customLogo || Plasmoid.icon
         }
 

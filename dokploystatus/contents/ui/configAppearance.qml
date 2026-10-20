@@ -13,6 +13,8 @@ KCM.SimpleKCM {
     property string cfg_badgeStyleDefault
     property int cfg_badgeSpacing
     property int cfg_badgeSpacingDefault
+    property int cfg_logoSpacing
+    property int cfg_logoSpacingDefault
     property bool cfg_showLogo
     property bool cfg_showLogoDefault
     property string cfg_logoIcon
@@ -96,6 +98,24 @@ KCM.SimpleKCM {
                 onClicked: page.cfg_logoIcon = ""
                 QQC2.ToolTip.text: text
                 QQC2.ToolTip.visible: hovered
+            }
+        }
+
+        RowLayout {
+            Kirigami.FormData.label: i18n("Logo spacing:")
+            enabled: page.cfg_showLogo
+
+            QQC2.Slider {
+                from: 0
+                to: 24
+                stepSize: 1
+                snapMode: QQC2.Slider.SnapAlways
+                value: page.cfg_logoSpacing
+                onMoved: page.cfg_logoSpacing = value
+            }
+
+            QQC2.Label {
+                text: i18n("+%1 px", page.cfg_logoSpacing)
             }
         }
 

@@ -76,6 +76,10 @@
       <label>Gap in pixels between the logo and the badges</label>
       <default>4</default>
     </entry>
+    <entry name="logoSpacing" type="Int">
+      <label>Extra gap in pixels between the logo and the first badge</label>
+      <default>0</default>
+    </entry>
     <entry name="badgeStyle" type="String">
       <label>Panel style: square badges, rounded badges, or an icon with a status dot</label>
       <default>square</default>

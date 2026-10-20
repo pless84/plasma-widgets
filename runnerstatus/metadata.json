@@ -12,7 +12,7 @@
         "Id": "dk.madebypless.runnerstatus",
         "License": "GPL-2.0-or-later",
         "Name": "Runner Status",
-        "Version": "1.5",
+        "Version": "1.6",
         "Website": "https://github.com/pless84/plasma-widgets",
         "BugReportUrl": "https://github.com/pless84/plasma-widgets/issues"
     },

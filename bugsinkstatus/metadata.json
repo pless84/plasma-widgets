@@ -12,7 +12,7 @@
         "Id": "dk.madebypless.bugsinkstatus",
         "License": "GPL-2.0-or-later",
         "Name": "Bugsink Status",
-        "Version": "1.7",
+        "Version": "1.8",
         "Website": "https://github.com/pless84/plasma-widgets",
         "BugReportUrl": "https://github.com/pless84/plasma-widgets/issues"
     },
