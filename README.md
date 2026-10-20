@@ -22,7 +22,7 @@ Every badge widget offers square or rounded badges, adjustable colours, a choice
 
 ## Screenshots
 
-The screenshots show sample data, apart from GitHub Status, which shows the live public feed.
+The screenshots show sample data, apart from LLM Status, which shows a real local Ollama server.
 
 ### GitHub Status
 
@@ -30,7 +30,7 @@ The panel shows a badge per component state (major outage, partial outage, degra
 
 <img src="screenshots/githubstatus-panel.png" width="84" alt="GitHub Status in the panel: a green badge showing 11 operational components">
 
-<img src="screenshots/githubstatus-popup.png" width="396" alt="GitHub Status popup: All Systems Operational, with every component listed as operational and the badge row along the bottom">
+<img src="screenshots/githubstatus-popup.png" width="406" alt="GitHub Status popup: two active incidents with their status, affected services and latest update, upcoming maintenance, and the badge row along the bottom">
 
 Each incident in the popup shows its status (Investigating, Identified, Monitoring…), which services it affects and GitHub's latest update. You get a notification when an incident starts, moves to its next step or is resolved, and in badge mode an extra badge marks an ongoing incident even when no component is listed as affected. Maintenance in progress and upcoming scheduled maintenance have their own sections.
 
@@ -40,7 +40,7 @@ The panel shows count badges for review requests, unread notifications, open pul
 
 <img src="screenshots/githubaccount-panel.png" width="303" alt="GitHub Account in the panel: badges for 2 review requests, 3 unread notifications, 4 open pull requests, 2 CI failing, 2 CI running and 2 CI passing">
 
-<img src="screenshots/githubaccount-popup.png" width="468" alt="GitHub Account popup: review requests, notifications with unread ones in bold, open pull requests with check dots, and the count badges along the bottom">
+<img src="screenshots/githubaccount-popup.png" width="478" alt="GitHub Account popup: review requests, unread notifications, your pull requests with check, review and merge state, recently pushed repositories, and the count badges along the bottom">
 
 Your own pull requests show their review and merge state ("Changes requested · conflicts", "Approved · ready", "Behind base"), and a failing PR or repository names the checks that failed; clicking it opens the first failing check. You get a notification when CI starts failing or is fixed. Under **General** you can leave out review requests sent to your teams and choose how recently pushed a repository must be to count towards the CI badges (14 days by default).
 
@@ -50,7 +50,7 @@ The panel shows a badge per sensor state, like PRTG's own status bar. Under **Ap
 
 <img src="screenshots/prtgstatus-panel.png" width="324" alt="PRTG Status in the panel: badges for 1 down, 1 down acknowledged, 2 warning, 1 unusual, 42 paused and 873 up">
 
-<img src="screenshots/prtgstatus-popup.png" width="468" alt="PRTG Status popup: sensors grouped under Down, Warning, Unusual and Acknowledged, with the status badges along the bottom">
+<img src="screenshots/prtgstatus-popup.png" width="478" alt="PRTG Status popup: counts per probe, down sensors with how long they have been down and their priority, a warning and an acknowledged alarm, and the status badges along the bottom">
 
 Down sensors show how long they have been down, and each group lists the highest-priority, longest-down sensors first (priority stars appear when your sensors' priorities differ). Hover a sensor for its probe and group. With more than one probe, the tooltip and popup show the counts per probe and flag a probe whose sensors are all unknown, which usually means the probe itself is down. The counts come from PRTG's sensor tree in two small requests instead of downloading every sensor. Under **General** you can limit notifications to sensors of a minimum priority.
 
@@ -60,7 +60,7 @@ The same badges for your Docker containers. Click for every container, grouped b
 
 <img src="screenshots/dockerstatus-panel.png" width="302" alt="Docker Status in the panel: badges for 1 failed, 1 unhealthy, 1 restarting, 1 paused, 2 stopped and 3 running containers">
 
-<img src="screenshots/dockerstatus-popup.png" width="468" alt="Docker Status popup: containers grouped by Compose project with a state dot, image, status and ports, and start, stop and restart buttons">
+<img src="screenshots/dockerstatus-popup.png" width="478" alt="Docker Status popup: a Compose stack with a container killed for running out of memory, unhealthy and restarting containers, stack buttons including remove, the Images section with delete buttons, and reclaimable disk space">
 
 Each Compose stack also has a remove button that runs `docker compose --project-name <project> down`: it removes the stack's containers and network, but keeps its volumes and images. Below the containers, an **Images** section lists your images (size, age, and which container uses each), with a delete button for the ones no container uses, including untagged leftovers from rebuilds. Both remove and delete need a second click: the first turns the button into a red **Confirm** for five seconds. The Images section can be switched off under **General**.
 
@@ -74,7 +74,7 @@ Error tracking from a [Bugsink](https://www.bugsink.com/) server: badges for new
 
 <img src="screenshots/bugsinkstatus-panel.png" width="212" alt="Bugsink Status in the panel: badges for 2 new, 2 open, 1 muted and 6 resolved issues">
 
-<img src="screenshots/bugsinkstatus-popup.png" width="468" alt="Bugsink Status popup: open issues grouped by project with error type and message, events and last seen, and resolve and mute buttons">
+<img src="screenshots/bugsinkstatus-popup.png" width="478" alt="Bugsink Status popup: open issues by project with short ids, a regressed issue, new events since the last check, and resolve and mute buttons">
 
 Muted and resolved badges are off by default; switch them on under **Show badges**. Bugsink's API can't filter issues by status, so the widget reads each project's most recently seen issues (10 pages by default, adjustable) to count them.
 
@@ -98,7 +98,7 @@ Deployments from a [Dokploy](https://dokploy.com/) server: badges for failed, de
 
 <img src="screenshots/dokploystatus-panel.png" width="212" alt="Dokploy Status in the panel: badges for 1 failed, 1 deploying, 7 deployed and 1 idle service">
 
-<img src="screenshots/dokploystatus-popup.png" width="468" alt="Dokploy Status popup: services grouped by project and environment with type and status, deploy and stop buttons, and a spinner on the one that is deploying">
+<img src="screenshots/dokploystatus-popup.png" width="478" alt="Dokploy Status popup: services by project and environment with the last deployment time, duration and commit, why a deployment failed, backup status and server, and deploy and stop buttons">
 
 While something is deploying, the widget checks every few seconds so you see the result straight away, and it notifies you when a deployment fails.
 
