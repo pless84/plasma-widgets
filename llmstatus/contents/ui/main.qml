@@ -19,7 +19,8 @@ PlasmoidItem {
     readonly property bool fromDashboard: Plasmoid.configuration.source === "dashboard"
     readonly property string serverUrl: (fromDashboard ? Plasmoid.configuration.dashboardUrl : Plasmoid.configuration.ollamaUrl)
         .trim().replace(/\/+$/, "")
-    readonly property bool readGpu: !fromDashboard && Plasmoid.configuration.showGpu
+    // gpu.sh reads this computer's GPU, so it says nothing about an Ollama server on another host.
+    readonly property bool readGpu: !fromDashboard && Plasmoid.configuration.showGpu && Logic.isLocalHost(serverUrl)
 
     // The status as an "llm" block (see logic.js), or null before the first check.
     property var llm: null
@@ -42,6 +43,8 @@ PlasmoidItem {
     property var pendingPs: null
     property var pendingTags: null
     property var pendingGpu: null
+    // What Logic.trackUsage() returned last time (Ollama only): when each loaded model was last used.
+    property var usage: null
 
     readonly property var servers: Logic.llmServers(llm)
     readonly property string llmState: Logic.llmState(llm)
@@ -67,12 +70,27 @@ PlasmoidItem {
     } : null
     readonly property var badges: [statusBadge, loadedBadge].filter(b => b)
 
+    readonly property bool gpuHot: !!gpu && gpu.temp_c >= Logic.TEMP_WARN
+    // Ollama's own share of the GPU memory: the card is shared with other programs.
+    readonly property var ollamaVramGb: gpu && gpu.mem_total_gb ? Logic.ollamaVramGb(loadedModels) : null
+    // Programs other than Ollama using GPU memory, when a loaded model doesn't fit on the GPU completely.
+    readonly property string spillText: {
+        if (!gpu || !gpu.apps || gpu.apps.length === 0) return ""
+        if (!loadedModels.some(m => { const p = Logic.gpuPercent(m); return p !== null && p < 100 })) return ""
+        return i18n("Also using GPU memory: %1", gpu.apps.slice(0, 3).map(a => i18n("%1 %2 GB", a.name, a.used_gb)).join(", "))
+    }
+
     readonly property string gpuText: {
         if (!gpu) return ""
         const parts = []
         if (hasGpuLoad) parts.push(i18n("GPU %1%", gpu.util))
         if (gpu.mem_total_gb) parts.push(i18n("%1 / %2 GB VRAM", gpu.mem_used_gb, gpu.mem_total_gb))
         else if (gpu.alloc_gb !== null && gpu.alloc_gb !== undefined) parts.push(i18n("%1 GB allocated", gpu.alloc_gb))
+        if (ollamaVramGb !== null) parts.push(i18n("Ollama %1 GB", ollamaVramGb))
+        if (gpu.temp_c !== null && gpu.temp_c !== undefined) parts.push(i18n("%1 °C", gpu.temp_c))
+        if (gpu.power_w !== null && gpu.power_w !== undefined) {
+            parts.push(gpu.power_limit_w ? i18n("%1 / %2 W", gpu.power_w, gpu.power_limit_w) : i18n("%1 W", gpu.power_w))
+        }
         const m = llm.memory
         if (m && m.free_pct !== null && m.free_pct !== undefined) parts.push(i18n("RAM %1% used", 100 - m.free_pct))
         if (m && m.swap_total_gb) parts.push(i18n("swap %1 / %2 GB", m.swap_used_gb, m.swap_total_gb))
@@ -87,7 +105,7 @@ PlasmoidItem {
         const down = servers.filter(s => !s.up).length
         if (down > 0) return servers.length === 1 ? i18n("%1 is down", servers[0].name) : i18np("%1 LLM server down", "%1 LLM servers down", down)
         const models = loadedCount > 0 ? i18np("%1 model loaded", "%1 models loaded", loadedCount) : i18n("No model loaded")
-        return hasGpuLoad ? i18n("%1 · GPU %2%", models, gpu.util) : models
+        return hasGpuLoad ? (llmState === "busy" ? i18n("%1 · GPU busy %2%", models, gpu.util) : i18n("%1 · GPU %2%", models, gpu.util)) : models
     }
 
     // White or near-black, whichever reads better on the given background colour.
@@ -104,6 +122,23 @@ PlasmoidItem {
         case "loaded": return root.look.colors.colorLoaded
         default: return Kirigami.Theme.disabledTextColor
         }
+    }
+
+    // "last request 12s ago, took 3.1 s", plus the HTTP status when it failed.
+    function requestText(server) {
+        const r = server.request
+        if (!r) return server.lastRequest ? i18n("last request %1", ago(server.lastRequest)) : ""
+        const parts = [i18n("last request %1", ago(r.time))]
+        if (r.secs !== null) {
+            parts.push(r.secs < 60 ? i18n("took %1 s", Math.round(r.secs * 10) / 10) : i18n("took %1", Logic.formatDuration(r.secs)))
+        }
+        if (r.failed) parts.push(i18n("HTTP %1", r.status))
+        return parts.join(", ")
+    }
+
+    // A loaded model's details: "12.2B · Q4_K_M · ctx 8k".
+    function modelDetailsText(model) {
+        return Logic.modelDetails(model).concat(model.context ? [i18n("ctx %1", Logic.shortCount(model.context))] : []).join(" · ")
     }
 
     function ago(time) {
@@ -219,6 +254,10 @@ PlasmoidItem {
 
     function apply(block) {
         const result = Logic.llmChanges(block, llmSnapshot)
+        if (!fromDashboard) {
+            // A failed /api/ps says nothing about the models, so it must not wipe what was tracked.
+            usage = block.ollama.up ? Logic.trackUsage(usage, pendingPs ? block.ollama.models : null, serverNow) : null
+        }
         llm = block
         llmSnapshot = result.snapshot
         loaded = true
@@ -235,6 +274,7 @@ PlasmoidItem {
         loaded = false
         llm = null
         llmSnapshot = null
+        usage = null
         host = null
         errorText = ""
         loading = false
@@ -617,7 +657,7 @@ PlasmoidItem {
                 font: Kirigami.Theme.smallFont
                 elide: Text.ElideRight
                 // Nearly full swap is the usual reason generation slows down.
-                color: (Logic.swapPercent(root.llm ? root.llm.memory : null) || 0) >= 80
+                color: root.gpuHot || (Logic.swapPercent(root.llm ? root.llm.memory : null) || 0) >= 80
                     ? root.stateColor("busy") : Kirigami.Theme.textColor
                 text: root.host ? root.host.hostname + " · " + root.gpuText : root.gpuText
             }
@@ -709,6 +749,8 @@ PlasmoidItem {
                                 elide: Text.ElideRight
                                 font: Kirigami.Theme.smallFont
                                 opacity: 0.7
+                                color: serverItem.modelData.request && serverItem.modelData.request.failed
+                                    ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.textColor
                                 text: {
                                     const s = serverItem.modelData
                                     return [
@@ -717,7 +759,7 @@ PlasmoidItem {
                                         s.kind === "ollama" && s.up && s.installed.length > 0
                                             ? i18np("%1 model installed", "%1 models installed", s.installed.length) : "",
                                         s.kind === "mlx" && s.up && s.uptime ? i18n("up %1", Logic.formatDuration(s.uptime)) : "",
-                                        s.lastRequest ? i18n("last request %1", root.ago(s.lastRequest)) : "",
+                                        root.requestText(s),
                                     ].filter(t => t).join(" · ")
                                 }
                             }
@@ -743,6 +785,17 @@ PlasmoidItem {
                     wrapMode: Text.WordWrap
                 }
 
+                PlasmaComponents.Label {
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    Layout.leftMargin: Kirigami.Units.largeSpacing
+                    visible: loadedHeader.visible && !loadedHeader.collapsed && root.spillText !== ""
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                    text: root.spillText
+                    wrapMode: Text.WordWrap
+                }
+
                 Repeater {
                     model: loadedHeader.collapsed ? [] : root.loadedModels
 
@@ -750,6 +803,8 @@ PlasmoidItem {
                         id: modelItem
                         required property var modelData
                         readonly property var onGpu: Logic.gpuPercent(modelData)
+                        readonly property real usedAt: root.usage && root.usage.used[modelData.name] || 0
+                        readonly property bool inUse: !root.fromDashboard && Logic.modelInUse(root.usage, modelData.name, root.serverNow)
 
                         Layout.fillWidth: true
 
@@ -785,8 +840,20 @@ PlasmoidItem {
                                 text: [
                                     modelItem.onGpu === null ? "" : modelItem.onGpu >= 100 ? i18n("all on GPU")
                                         : modelItem.onGpu <= 0 ? i18n("all on CPU") : i18n("%1% on GPU", modelItem.onGpu),
+                                    modelItem.inUse ? i18n("in use") : "",
+                                    modelItem.usedAt && !modelItem.inUse ? i18n("used ~%1 ago", Logic.formatDuration(root.serverNow - modelItem.usedAt)) : "",
                                     modelItem.modelData.expires ? root.unloadText(modelItem.modelData.expires) : "",
                                 ].filter(t => t).join(" · ")
+                            }
+
+                            PlasmaComponents.Label {
+                                textFormat: Text.PlainText
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                font: Kirigami.Theme.smallFont
+                                opacity: 0.7
+                                visible: text !== ""
+                                text: root.modelDetailsText(modelItem.modelData)
                             }
                         }
                     }
@@ -819,7 +886,7 @@ PlasmoidItem {
                         }
                         PlasmaComponents.Label {
                             textFormat: Text.PlainText
-                            text: i18n("%1 GB", modelData.size_gb)
+                            text: Logic.modelDetails(modelData).concat([i18n("%1 GB", modelData.size_gb)]).join(" · ")
                             opacity: 0.7
                         }
                     }
