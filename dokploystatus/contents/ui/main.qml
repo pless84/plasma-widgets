@@ -18,10 +18,16 @@ PlasmoidItem {
     readonly property string scriptPath: Qt.resolvedUrl("../code/dokploy.py").toString().replace("file://", "")
     readonly property string serverUrl: Plasmoid.configuration.serverUrl.trim().replace(/\/+$/, "")
 
-    // Projects as {id, name, environments: [{id, name, services: [{type, id, name, status}]}]}.
+    // Projects as {id, name, environments: [{id, name, services: [{type, id, name, status, ...}]}]}.
+    // Applications and compose stacks also carry their newest deployment and server, databases
+    // their server and backups (see dokploy.py).
     property var projects: []
+    // When the data was fetched, for "2 h ago".
+    property var now: new Date()
     // Previous status of each service by id, to notify only on changes; null until the first check.
     property var previousStatus: null
+    // Ids of the failed backup runs already seen; null until the first check.
+    property var seenBackupFailures: null
     // Ids of services with a deploy/start/stop in progress.
     property var busyIds: ({})
     property bool loaded: false
@@ -44,9 +50,9 @@ PlasmoidItem {
     ]
     readonly property var typeLabels: ({
         application: i18n("Application"), compose: i18n("Compose"), postgres: i18n("PostgreSQL"), mysql: i18n("MySQL"),
-        mariadb: i18n("MariaDB"), mongo: i18n("MongoDB"), redis: i18n("Redis"),
+        mariadb: i18n("MariaDB"), mongo: i18n("MongoDB"), redis: i18n("Redis"), libsql: i18n("libSQL"),
     })
-    readonly property var databaseTypes: ["postgres", "mysql", "mariadb", "mongo", "redis"]
+    readonly property var databaseTypes: ["postgres", "mysql", "mariadb", "mongo", "redis", "libsql"]
 
     readonly property var services: Logic.allServices(projects)
     readonly property var stateCounts: Logic.countStates(services)
@@ -56,9 +62,70 @@ PlasmoidItem {
     readonly property var panelStates: Logic.panelStates(serviceStates, stateCounts, Plasmoid.configuration.showZeroInPanel)
     // One group per environment that has services: {title, projectId, environmentId, services}.
     readonly property var groups: Logic.groupServices(projects, serviceStates.map(st => st.key))
+    // Rows name their server only when services run on more than one.
+    readonly property bool showServers: Logic.multipleServers(services)
 
     function statusKey(service) {
         return Logic.statusKey(service)
+    }
+
+    // "5 min ago", "2 h ago", "3 d ago"
+    function agoText(minutes) {
+        if (minutes === null) {
+            return ""
+        }
+        if (minutes < 1) {
+            return i18n("just now")
+        }
+        if (minutes < 60) {
+            return i18np("%1 min ago", "%1 min ago", minutes)
+        }
+        if (minutes < 60 * 24) {
+            return i18np("%1 h ago", "%1 h ago", Math.floor(minutes / 60))
+        }
+        return i18np("%1 d ago", "%1 d ago", Math.floor(minutes / (60 * 24)))
+    }
+
+    // The status as shown on a row: "Idle" is split into never deployed and stopped where known.
+    function statusLabel(service) {
+        const idle = Logic.idleDetail(service)
+        return idle === "never" ? i18n("Never deployed") : idle === "stopped" ? i18n("Stopped") : stateOf(statusKey(service)).label
+    }
+
+    // "deployed 2 h ago · 1m 32s · Fix login (a1b2c3d)" for applications and compose stacks.
+    function deploymentLine(service) {
+        const d = Logic.deploymentSummary(service, now)
+        if (!d || statusKey(service) === "running") {
+            return ""
+        }
+        const ago = agoText(d.minutes)
+        const parts = [d.failed ? (ago ? i18n("failed %1", ago) : i18n("failed")) : (ago ? i18n("deployed %1", ago) : i18n("deployed"))]
+        if (d.duration !== null) {
+            parts.push(Logic.formatDuration(d.duration))
+        }
+        if (d.title) {
+            parts.push(d.commit ? i18n("%1 (%2)", d.title, d.commit) : d.title)
+        }
+        return parts.join(" · ")
+    }
+
+    // "last backup 6 h ago", "backup failed 6 h ago" or "no backups" for databases.
+    function backupLine(service) {
+        if (!root.databaseTypes.includes(service.type)) {
+            return ""
+        }
+        const b = Logic.backupSummary(service, now)
+        if (b.kind === "none") {
+            return i18n("no backups")
+        }
+        if (b.kind === "failed") {
+            return b.minutes === null ? i18n("backup failed") : i18n("backup failed %1", agoText(b.minutes))
+        }
+        return b.kind === "ok" ? i18n("last backup %1", agoText(b.minutes)) : i18n("no backup yet")
+    }
+
+    function serverName(service) {
+        return typeof service.server !== "string" ? "" : service.server || i18n("local")
     }
 
     function stateOf(key) {
@@ -93,8 +160,10 @@ PlasmoidItem {
 
     function apply(data) {
         projects = data.projects
+        now = new Date()
         loaded = true
         notifyAboutFailures()
+        notifyAboutBackupFailures()
     }
 
     function notifyAboutFailures() {
@@ -107,7 +176,8 @@ PlasmoidItem {
         }
         if (fresh.length === 1) {
             failureNotification.title = i18n("Dokploy: deployment of %1 failed", fresh[0].name)
-            failureNotification.text = typeLabels[fresh[0].type] || fresh[0].type
+            const reason = Logic.failureReason(fresh[0])
+            failureNotification.text = (typeLabels[fresh[0].type] || fresh[0].type) + (reason ? "\n" + reason : "")
         } else {
             failureNotification.title = i18np("Dokploy: %1 deployment failed", "Dokploy: %1 deployments failed", fresh.length)
             failureNotification.text = fresh.slice(0, 4).map(s => s.name).join("\n")
@@ -115,10 +185,29 @@ PlasmoidItem {
         failureNotification.sendEvent()
     }
 
+    function notifyAboutBackupFailures() {
+        const result = Logic.freshBackupFailures(services, seenBackupFailures, now)
+        const fresh = result.fresh
+        seenBackupFailures = result.seen
+
+        if (fresh.length === 0 || !Plasmoid.configuration.notifyOnFailure) {
+            return
+        }
+        if (fresh.length === 1) {
+            backupNotification.title = i18n("Dokploy: backup of %1 failed", fresh[0].service.name)
+            backupNotification.text = fresh[0].minutes === null ? i18n("The backup failed") : i18n("The backup failed %1", agoText(fresh[0].minutes))
+        } else {
+            backupNotification.title = i18np("Dokploy: %1 backup failed", "Dokploy: %1 backups failed", fresh.length)
+            backupNotification.text = fresh.slice(0, 4).map(f => f.service.name).join("\n")
+        }
+        backupNotification.sendEvent()
+    }
+
     onServerUrlChanged: {
         loaded = false
         projects = []
         previousStatus = null
+        seenBackupFailures = null
         errorText = ""
         refresh()
     }
@@ -167,6 +256,14 @@ PlasmoidItem {
         componentName: "plasma_workspace"
         eventId: "notification"
         iconName: "cloud-upload"
+        urgency: Notification.HighUrgency
+    }
+
+    Notification {
+        id: backupNotification
+        componentName: "plasma_workspace"
+        eventId: "notification"
+        iconName: "drive-harddisk"
         urgency: Notification.HighUrgency
     }
 
@@ -429,6 +526,13 @@ PlasmoidItem {
         Layout.fillWidth: true
         onClicked: Qt.openUrlExternally(root.serviceUrl(group, service))
 
+        // "Deployed" is what Dokploy recorded for the last deployment, not the containers' health.
+        PlasmaComponents.ToolTip.text: row.key === "done"
+            ? i18n("Deployed: the last deployment succeeded. This is not a live health check of the running containers.")
+            : ""
+        PlasmaComponents.ToolTip.visible: hovered && PlasmaComponents.ToolTip.text !== ""
+        PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
+
         contentItem: RowLayout {
             spacing: Kirigami.Units.smallSpacing
 
@@ -454,9 +558,32 @@ PlasmoidItem {
                 PlasmaComponents.Label {
                     textFormat: Text.PlainText
                     Layout.fillWidth: true
-                    text: (root.typeLabels[row.service.type] || row.service.type) + " · " + root.stateOf(row.key).label
+                    text: (root.typeLabels[row.service.type] || row.service.type) + " · " + root.statusLabel(row.service)
+                        + (root.showServers && root.serverName(row.service) ? " · " + root.serverName(row.service) : "")
                     opacity: 0.7
                     font: Kirigami.Theme.smallFont
+                    elide: Text.ElideRight
+                }
+                // When it was last deployed (applications, compose stacks) or backed up (databases).
+                PlasmaComponents.Label {
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    visible: text !== ""
+                    text: row.service.backups !== undefined ? root.backupLine(row.service) : root.deploymentLine(row.service)
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                    elide: Text.ElideRight
+                }
+                // Why the last deployment failed.
+                PlasmaComponents.Label {
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    visible: text !== ""
+                    text: Logic.failureReason(row.service)
+                    color: root.look.colors.colorFailed
+                    font: Kirigami.Theme.smallFont
+                    wrapMode: Text.WordWrap
+                    maximumLineCount: 2
                     elide: Text.ElideRight
                 }
             }

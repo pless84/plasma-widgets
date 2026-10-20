@@ -12,7 +12,7 @@
         "Id": "dk.madebypless.dokploystatus",
         "License": "GPL-2.0-or-later",
         "Name": "Dokploy Status",
-        "Version": "1.9",
+        "Version": "1.10",
         "Website": "https://github.com/pless84/plasma-widgets",
         "BugReportUrl": "https://github.com/pless84/plasma-widgets/issues"
     },
