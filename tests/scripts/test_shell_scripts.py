@@ -80,6 +80,31 @@ def test_docker_action(docker, run, context, expected):
     assert docker.calls("docker")[-1]["args"] == expected
 
 
+@pytest.mark.parametrize("args, expected", [
+    (["down", "--project", "shop"], ["compose", "--project-name", "shop", "down"]),
+    (["start", "--project", "shop"], ["compose", "--project-name", "shop", "start"]),
+    (["rmi", "nginx:1.27"], ["image", "rm", "nginx:1.27"]),
+    (["rmi", "sha256:ccc333"], ["image", "rm", "sha256:ccc333"]),
+])
+def test_docker_stack_and_image_actions(docker, run, args, expected):
+    assert run("dockerstatus", "action.sh", "", *args).returncode == 0
+    assert docker.calls("docker")[-1]["args"] == expected
+
+
+@pytest.mark.parametrize("args", [["down", "a1"], ["rmi"], ["rmi", "--project", "shop"], ["prune", "a1"]])
+def test_docker_action_refuses_bad_use(docker, run, args):
+    # "down" is for whole stacks only, and nothing unknown reaches docker.
+    assert run("dockerstatus", "action.sh", "", *args).returncode == 2
+    assert docker.calls("docker") == []
+
+
+def test_docker_images(docker, run):
+    assert run("dockerstatus", "images.sh", "").stdout == '{"ID":"a1"}\n'
+    assert docker.calls("docker")[-1]["args"] == ["image", "ls", "--no-trunc", "--format", "{{json .}}"]
+    run("dockerstatus", "images.sh", "colima")
+    assert docker.calls("docker")[-1]["args"][:3] == ["--context", "colima", "image"]
+
+
 @pytest.mark.parametrize("context, expected", [
     ("", ["compose", "--project-name", "shop", "stop"]),
     ("colima", ["--context", "colima", "compose", "--project-name", "shop", "stop"]),
@@ -89,7 +114,7 @@ def test_docker_stack_action(docker, run, context, expected):
     assert docker.calls("docker")[-1]["args"] == expected
 
 
-@pytest.mark.parametrize("args", [("rm", "a1"), ("down", "--project", "shop")])
+@pytest.mark.parametrize("args", [("rm", "a1"), ("kill", "--project", "shop")])
 def test_docker_action_rejects_other_commands(docker, run, args):
     result = run("dockerstatus", "action.sh", "", *args)
     assert result.returncode == 2 and "Unknown action" in result.stderr

@@ -50,6 +50,10 @@
       <label>Send a desktop notification when a container fails or becomes unhealthy</label>
       <default>true</default>
     </entry>
+    <entry name="showImages" type="Bool">
+      <label>Show an Images section in the popup, with a delete button for images no container uses</label>
+      <default>true</default>
+    </entry>
     <entry name="collapsedGroups" type="StringList">
       <label>Groups collapsed in the popup</label>
       <default></default>

@@ -56,6 +56,8 @@ The same badges for your Docker containers. Click for every container, grouped b
 
 <img src="screenshots/dockerstatus-popup.png" width="468" alt="Docker Status popup: containers grouped by Compose project with a state dot, image, status and ports, and start, stop and restart buttons">
 
+Each Compose stack also has a remove button that runs `docker compose --project-name <project> down`: it removes the stack's containers and network, but keeps its volumes and images. Below the containers, an **Images** section lists your images (size, age, and which container uses each), with a delete button for the ones no container uses, including untagged leftovers from rebuilds. Both remove and delete need a second click: the first turns the button into a red **Confirm** for five seconds. The Images section can be switched off under **General**.
+
 A container counts as **failed** when it exited with an error. Exiting normally or being stopped with `docker stop` counts as **stopped**. A stack's buttons run `docker compose --project-name <project> start`, `stop` or `restart`, so they work without the compose file on hand (including on a remote context); they start the stack's existing containers rather than recreating them like `up` would. The settings let you pick the Docker context (e.g. a Podman machine or remote host), how often to check (default every 15 seconds), which states get a badge, the badge style and colours, and whether to notify you when a container fails or becomes unhealthy.
 
 ### Bugsink Status

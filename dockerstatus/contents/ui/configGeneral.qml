@@ -19,6 +19,7 @@ KCM.SimpleKCM {
     property alias cfg_showZeroInPanel: showZeroInPanel.checked
     property alias cfg_showTotalInPanel: showTotalInPanel.checked
     property alias cfg_notifyOnProblem: notifyOnProblem.checked
+    property alias cfg_showImages: showImages.checked
 
     // Docker contexts, as {name, current}.
     property var dockerContexts: []
@@ -99,6 +100,12 @@ KCM.SimpleKCM {
         QQC2.Switch {
             id: showTotalInPanel
             text: i18n("Show the total, e.g. \"(of 7)\"")
+        }
+
+        QQC2.CheckBox {
+            id: showImages
+            Kirigami.FormData.label: i18n("Popup:")
+            text: i18n("Show images, with a delete button for unused ones")
         }
 
         QQC2.CheckBox {

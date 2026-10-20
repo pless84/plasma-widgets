@@ -28,6 +28,10 @@ PlasmoidItem {
     // The busyIds keys each running action.sh command holds, by its command line.
     property var pendingActions: ({})
     property bool loaded: false
+    // Images from images.sh (see Logic.parseImages), when the Images section is switched on.
+    property var images: []
+    // The destructive action waiting for its second click ("down:<project>", "rmi:<image id>"), or "".
+    property string armedAction: ""
     property date lastChecked
     property string errorText: ""
     property string actionError: ""
@@ -69,6 +73,15 @@ PlasmoidItem {
 
     function refresh() {
         fetcher.connectSource("sh " + Logic.shellQuote(codeDir + "fetch.sh") + " " + Logic.shellQuote(dockerContext))
+        if (Plasmoid.configuration.showImages) {
+            imageFetcher.connectSource("sh " + Logic.shellQuote(codeDir + "images.sh") + " " + Logic.shellQuote(dockerContext))
+        }
+    }
+
+    // The first click on a destructive button arms it; a second click within 5 seconds runs it.
+    function arm(key) {
+        armedAction = key
+        disarmTimer.restart()
     }
 
     // Runs action.sh with `args` after the context, marking `keys` busy until it finishes.
@@ -86,7 +99,12 @@ PlasmoidItem {
         runAction([container.id], action + " " + Logic.shellQuote(container.id))
     }
 
-    // Starts, stops or restarts a whole Compose stack (a group from Logic.groupContainers).
+    // Deletes an image (one tag of it, or an untagged image).
+    function runImageAction(image) {
+        runAction(["image:" + image.id], "rmi " + Logic.shellQuote(image.ref))
+    }
+
+    // Starts, stops, restarts or takes down ("down") a whole Compose stack (a group from Logic.groupContainers).
     function runStackAction(group, action) {
         runAction(["project:" + group.project].concat(group.containers.map(c => c.id)),
             action + " --project " + Logic.shellQuote(group.project))
@@ -122,6 +140,7 @@ PlasmoidItem {
     onDockerContextChanged: {
         loaded = false
         containers = []
+        images = []
         stateCounts = {}
         previousStates = null
         errorText = ""
@@ -147,6 +166,30 @@ PlasmoidItem {
                 root.errorText = i18n("Could not read docker output: %1", e.message)
             }
         }
+    }
+
+    P5Support.DataSource {
+        id: imageFetcher
+        engine: "executable"
+        connectedSources: []
+
+        // The image list is extra: if it fails, the section just stays as it was.
+        onNewData: (sourceName, data) => {
+            disconnectSource(sourceName)
+            if (data["exit code"] === 0) {
+                try {
+                    root.images = Logic.parseImages(data["stdout"])
+                } catch (e) {
+                    root.images = []
+                }
+            }
+        }
+    }
+
+    Timer {
+        id: disarmTimer
+        interval: 5000
+        onTriggered: root.armedAction = ""
     }
 
     P5Support.DataSource {
@@ -412,6 +455,32 @@ PlasmoidItem {
         }
     }
 
+    // A destructive button that needs a second click: the first turns it into a red "Confirm"
+    // for 5 seconds. `label` names the action, e.g. "Remove stack web".
+    component ConfirmButton: PlasmaComponents.ToolButton {
+        id: confirmButton
+        property string actionKey
+        property string label
+        property string explanation
+        signal confirmed()
+        readonly property bool armed: root.armedAction === actionKey
+
+        icon.name: "edit-delete"
+        icon.color: armed ? Kirigami.Theme.negativeTextColor : "transparent"
+        display: armed ? PlasmaComponents.AbstractButton.TextBesideIcon : PlasmaComponents.AbstractButton.IconOnly
+        text: armed ? i18n("Confirm") : label
+        onClicked: {
+            if (armed) {
+                root.armedAction = ""
+                confirmed()
+            } else {
+                root.arm(actionKey)
+            }
+        }
+        PlasmaComponents.ToolTip.text: armed ? i18n("Click again: %1", label) : (explanation || label)
+        PlasmaComponents.ToolTip.visible: hovered
+    }
+
     // One container in the popup: state dot, name, details, and start/stop/restart buttons.
     component ContainerRow: PlasmaComponents.ItemDelegate {
         id: row
@@ -666,6 +735,13 @@ PlasmoidItem {
                                 PlasmaComponents.ToolTip.text: text
                                 PlasmaComponents.ToolTip.visible: hovered
                             }
+                            ConfirmButton {
+                                visible: header.isStack && !header.busy
+                                actionKey: "down:" + group.modelData.project
+                                label: i18n("Remove stack %1", group.modelData.project)
+                                explanation: i18n("Remove stack %1 (docker compose down): its containers and network go; volumes and images stay", group.modelData.project)
+                                onConfirmed: root.runStackAction(group.modelData, "down")
+                            }
                         }
                         Repeater {
                             model: header.collapsed ? [] : group.modelData.containers
@@ -674,6 +750,84 @@ PlasmoidItem {
                                 container: modelData
                             }
                         }
+                    }
+                }
+
+                // ---- Images, with a delete button for those no container uses ----
+                GroupHeader {
+                    id: imagesHeader
+                    visible: Plasmoid.configuration.showImages && root.images.length > 0
+                    groupKey: "images"
+                    text: i18n("Images (%1)", root.images.length)
+                }
+
+                Repeater {
+                    model: imagesHeader.visible && !imagesHeader.collapsed ? root.images : []
+
+                    PlasmaComponents.ItemDelegate {
+                        id: imageRow
+                        required property var modelData
+                        readonly property var users: Logic.imageUsers(modelData, root.containers)
+                        readonly property bool busy: root.busyIds["image:" + modelData.id] === true
+                        readonly property string title: modelData.untagged
+                            ? i18n("Untagged %1", Logic.shortImage(modelData.id)) : modelData.ref
+
+                        Layout.fillWidth: true
+                        hoverEnabled: true
+
+                        contentItem: RowLayout {
+                            spacing: Kirigami.Units.smallSpacing
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 0
+                                PlasmaComponents.Label {
+                                    textFormat: Text.PlainText
+                                    Layout.fillWidth: true
+                                    text: imageRow.title
+                                    elide: Text.ElideMiddle
+                                }
+                                PlasmaComponents.Label {
+                                    textFormat: Text.PlainText
+                                    Layout.fillWidth: true
+                                    text: [
+                                        imageRow.modelData.size,
+                                        imageRow.modelData.created,
+                                        imageRow.users.length === 1 ? i18n("used by %1", imageRow.users[0].fullName)
+                                            : imageRow.users.length > 1 ? i18np("used by %1 container", "used by %1 containers", imageRow.users.length)
+                                            : i18n("unused"),
+                                    ].filter(t => t).join(" · ")
+                                    opacity: 0.7
+                                    font: Kirigami.Theme.smallFont
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            PlasmaComponents.BusyIndicator {
+                                Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                                Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                                visible: imageRow.busy
+                                running: visible
+                            }
+
+                            ConfirmButton {
+                                visible: !imageRow.busy
+                                enabled: imageRow.users.length === 0
+                                actionKey: "rmi:" + imageRow.modelData.id
+                                label: i18n("Delete image %1", imageRow.title)
+                                explanation: imageRow.users.length > 0
+                                    ? i18n("In use by %1; remove the container first", imageRow.users.map(c => c.fullName).join(", "))
+                                    : i18n("Delete image %1", imageRow.title)
+                                onConfirmed: root.runImageAction(imageRow.modelData)
+                            }
+                        }
+
+                        // A disabled button shows no tooltip, so the row says why an image can't be deleted.
+                        PlasmaComponents.ToolTip.text: imageRow.users.length > 0
+                            ? i18n("In use by %1; remove the container first", imageRow.users.map(c => c.fullName).join(", "))
+                            : imageRow.modelData.id
+                        PlasmaComponents.ToolTip.visible: hovered
+                        PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
                     }
                 }
             }

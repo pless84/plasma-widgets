@@ -68,10 +68,11 @@ test("parseContainers reads fetch.sh's JSON lines", () => {
     const containers = L.parseContainers(ps)
     assert.equal(containers.length, 5)
     assert.deepEqual(containers[0], { id: "a1", name: "web", fullName: "shop-web-1", project: "shop", image: "nginx:1.27",
-                                      stateKey: "running", status: "Up 1 hour", ports: "8080→80" })
+                                      imageRef: "nginx:1.27", stateKey: "running", status: "Up 1 hour", ports: "8080→80" })
     assert.equal(containers[3].name, "scratch")       // no compose service: the container name
     assert.equal(containers[3].project, "")
     assert.equal(containers[3].image, "0123456789ab")
+    assert.equal(containers[3].imageRef, "sha256:0123456789abcdef")
     assert.equal(L.parseContainers("").length, 0)
 })
 
@@ -120,4 +121,45 @@ test("panelStates and visibleStates", () => {
 test("shellQuote survives quotes", () => {
     assert.equal(L.shellQuote("it's"), "'it'\\''s'")
     assert.equal(L.shellQuote(""), "''")
+})
+
+// `docker image ls --no-trunc --format '{{json .}}'`, as images.sh prints it.
+const imageLs = [
+    { ID: "sha256:aaa111", Repository: "nginx", Tag: "1.27", Size: "192MB", CreatedSince: "2 weeks ago" },
+    { ID: "sha256:bbb222", Repository: "postgres", Tag: "17", Size: "438MB", CreatedSince: "3 weeks ago" },
+    { ID: "sha256:ccc333", Repository: "<none>", Tag: "<none>", Size: "88MB", CreatedSince: "5 days ago" },
+    { ID: "sha256:ddd444", Repository: "api", Tag: "latest", Size: "120MB", CreatedSince: "1 day ago" },
+    { ID: "sha256:0123456789abcdef", Repository: "<none>", Tag: "<none>", Size: "10MB", CreatedSince: "1 month ago" },
+    { ID: "sha256:eee555", Repository: "ghcr.io/pless84/tool", Tag: "2", Size: "50MB", CreatedSince: "1 hour ago" },
+].map(i => JSON.stringify(i)).join("\n") + "\n"
+
+test("parseImages: tagged images by name, untagged ones last and deleted by id", () => {
+    const images = L.parseImages(imageLs)
+    assert.deepEqual(images.map(i => i.ref), ["api:latest", "ghcr.io/pless84/tool:2", "nginx:1.27", "postgres:17",
+                                              "sha256:0123456789abcdef", "sha256:ccc333"])
+    assert.deepEqual(images[2], { id: "sha256:aaa111", ref: "nginx:1.27", repository: "nginx", tag: "1.27", untagged: false,
+                                  size: "192MB", created: "2 weeks ago" })
+    assert.equal(images[5].untagged, true)
+    assert.equal(images[5].repository, "")
+    assert.deepEqual(L.parseImages(""), [])
+})
+
+test("imageUsers: matches a container's image by tag, implied latest, registry prefix or id", () => {
+    const images = L.parseImages(imageLs)
+    const byRef = ref => images.find(i => i.ref === ref)
+    const containers = L.parseContainers(ps)
+    assert.deepEqual(L.imageUsers(byRef("nginx:1.27"), containers).map(c => c.id), ["a1"])
+    assert.deepEqual(L.imageUsers(byRef("postgres:17"), containers).map(c => c.id), ["a2"])  // stopped still counts
+    assert.deepEqual(L.imageUsers(byRef("sha256:0123456789abcdef"), containers).map(c => c.id), ["b1"])
+    assert.deepEqual(L.imageUsers(byRef("sha256:ccc333"), containers), [])
+    // "api:1" and "api:2" are other tags than api:latest.
+    assert.deepEqual(L.imageUsers(byRef("api:latest"), containers), [])
+    const more = [
+        { id: "x1", fullName: "x", image: "api", imageRef: "api" },
+        { id: "x2", fullName: "y", image: "docker.io/library/nginx:1.27", imageRef: "docker.io/library/nginx:1.27" },
+        { id: "x3", fullName: "z", image: "ghcr.io/pless84/tool:2", imageRef: "ghcr.io/pless84/tool:2" },
+    ]
+    assert.deepEqual(L.imageUsers(byRef("api:latest"), more).map(c => c.id), ["x1"])
+    assert.deepEqual(L.imageUsers(byRef("nginx:1.27"), more).map(c => c.id), ["x2"])
+    assert.deepEqual(L.imageUsers(byRef("ghcr.io/pless84/tool:2"), more).map(c => c.id), ["x3"])
 })

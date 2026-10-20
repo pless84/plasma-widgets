@@ -48,7 +48,7 @@ function shortImage(image) {
     return image.startsWith("sha256:") ? image.slice(7, 19) : image
 }
 
-// fetch.sh's output (one JSON object per line) -> [{id, name, fullName, project, image, stateKey, status, ports}]
+// fetch.sh's output (one JSON object per line) -> [{id, name, fullName, project, image, imageRef, stateKey, status, ports}]
 function parseContainers(stdout) {
     return stdout.split("\n").filter(line => line.trim()).map(line => JSON.parse(line)).map(c => ({
         id: c.ID,
@@ -56,6 +56,8 @@ function parseContainers(stdout) {
         fullName: c.Names,
         project: label(c.Labels, "com.docker.compose.project"),
         image: shortImage(c.Image),
+        // The image as the container was created from it ("nginx", "nginx:1.27", "sha256:…").
+        imageRef: c.Image,
         stateKey: classify(c),
         status: c.Status,
         ports: shortPorts(c.Ports),
@@ -115,6 +117,51 @@ function panelStates(states, counts, showZero) {
 
 function visibleStates(states, counts) {
     return states.filter(st => (counts[st.key] || 0) > 0)
+}
+
+// ---- Images ----
+
+// "docker.io/library/nginx" -> "nginx", "ghcr.io/x/y" stays: how `docker image ls` names a repository.
+function normalizeRepository(name) {
+    return name.replace(/^docker\.io\//, "").replace(/^library\//, "")
+}
+
+// images.sh's output (one JSON object per line) -> [{id, ref, repository, tag, untagged, size, created}],
+// tagged images by name first, untagged ones last. `ref` is what `docker image rm` gets: the
+// repository:tag, or the id for an untagged image (so deleting one tag leaves the others).
+function parseImages(stdout) {
+    const images = stdout.split("\n").filter(line => line.trim()).map(line => JSON.parse(line)).map(i => {
+        const untagged = !i.Repository || i.Repository === "<none>" || !i.Tag || i.Tag === "<none>"
+        return {
+            id: i.ID,
+            ref: untagged ? i.ID : i.Repository + ":" + i.Tag,
+            repository: untagged ? "" : i.Repository,
+            tag: untagged ? "" : i.Tag,
+            untagged: untagged,
+            size: i.Size || "",
+            created: i.CreatedSince || "",
+        }
+    })
+    return images.sort((a, b) => a.untagged !== b.untagged ? (a.untagged ? 1 : -1) : a.ref.localeCompare(b.ref))
+}
+
+// The containers (running or not) created from `image`. Docker refuses to delete those images.
+function imageUsers(image, containers) {
+    return containers.filter(c => {
+        const ref = c.imageRef || c.image
+        if (ref === image.id || (ref.startsWith("sha256:") && image.id.startsWith(ref))) {
+            return true
+        }
+        if (image.untagged) {
+            return false
+        }
+        const name = normalizeRepository(ref)
+        const colon = name.lastIndexOf(":")
+        const hasTag = colon > name.lastIndexOf("/")
+        const repository = hasTag ? name.slice(0, colon) : name
+        const tag = hasTag ? name.slice(colon + 1) : "latest"
+        return repository === image.repository && tag === image.tag
+    })
 }
 
 // The collapsed groups list with key added, or removed if it was there
