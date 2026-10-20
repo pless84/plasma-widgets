@@ -26,7 +26,8 @@ var defaults = {
     }
 }
 
-var badgeStyles = ["square", "rounded"]
+// "dot" (an icon with a status dot) exists only in some widgets; the others show it as square badges.
+var badgeStyles = ["square", "rounded", "dot"]
 
 function isColor(value) {
     return typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value)
@@ -127,13 +128,16 @@ function shellQuote(text) {
 }
 
 // Shell commands for reading and writing the file. Reading creates the folder first, so the
-// folder can be watched for changes even before the first save.
-function readCommand(dir, path) {
-    return "mkdir -p " + shellQuote(dir) + " && cat " + shellQuote(path) + " 2>/dev/null; true"
+// folder can be watched for changes even before the first save. `seq` makes each read a new
+// command: Plasma runs identical commands only once and shares their output.
+function readCommand(dir, path, seq) {
+    return "mkdir -p " + shellQuote(dir) + " && cat " + shellQuote(path) + " 2>/dev/null; true # " + seq
 }
 
+// Writes through a temporary file of its own, so two saves at once can't mix, and runs in the
+// background, so closing the settings dialog right after OK can't cut the save short.
 function writeCommand(dir, path, look) {
-    const tmp = path + ".tmp"
-    return "mkdir -p " + shellQuote(dir) + " && printf '%s' " + shellQuote(serialize(look))
-        + " > " + shellQuote(tmp) + " && mv -f " + shellQuote(tmp) + " " + shellQuote(path)
+    return "(mkdir -p " + shellQuote(dir) + " && t=$(mktemp " + shellQuote(dir + "/.look.XXXXXX") + ")"
+        + " && printf '%s' " + shellQuote(serialize(look)) + " > \"$t\" && mv -f \"$t\" " + shellQuote(path)
+        + ") </dev/null >/dev/null 2>&1 &"
 }

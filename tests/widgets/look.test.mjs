@@ -28,7 +28,7 @@ test("look.js and SharedLook.qml are identical in every widget", () => {
 })
 
 test("parse fills in missing or invalid values from the defaults", () => {
-    const look = Look.parse(JSON.stringify({ badgeStyle: "dot", badgeSpacing: 99, logoSpacing: 3, showLogo: "yes", colors: { error: "#ABCDEF", ok: "green" } }))
+    const look = Look.parse(JSON.stringify({ badgeStyle: "bubbles", badgeSpacing: 99, logoSpacing: 3, showLogo: "yes", colors: { error: "#ABCDEF", ok: "green" } }))
     assert.equal(look.badgeStyle, "square")
     assert.equal(look.badgeSpacing, 4)
     assert.equal(look.logoSpacing, 3)
@@ -76,8 +76,10 @@ test("fromConfig keeps a widget's look when it becomes the shared look", () => {
     assert.equal(shared.colors.warning, Look.defaults.colors.warning)
 })
 
-test("fromConfig drops the dot style, which only some widgets have", () => {
-    assert.equal(Look.fromConfig({ ...dockerConfig, badgeStyle: "dot" }, docker).badgeStyle, "square")
+test("the dot style survives into the shared look", () => {
+    // Widgets without it show square badges (their StatusBadge only checks for "rounded").
+    assert.equal(Look.fromConfig({ ...dockerConfig, badgeStyle: "dot" }, docker).badgeStyle, "dot")
+    assert.equal(Look.parse(JSON.stringify({ badgeStyle: "dot" })).badgeStyle, "dot")
 })
 
 test("withValue changes a copy, for settings and colour roles", () => {
@@ -89,11 +91,16 @@ test("withValue changes a copy, for settings and colour roles", () => {
     assert.equal(look.colors.error, "#111111")
 })
 
-test("writeCommand writes the JSON through a temporary file", () => {
+test("writeCommand writes through its own temporary file, in the background", () => {
     const cmd = Look.writeCommand("/home/me/.config/madebypless-widgets", "/home/me/.config/madebypless-widgets/look.json", Look.defaults)
-    assert.match(cmd, /^mkdir -p '\/home\/me\/\.config\/madebypless-widgets' && printf '%s' '\{/)
-    assert.match(cmd, /> '\/home\/me\/\.config\/madebypless-widgets\/look\.json\.tmp' && mv -f /)
+    assert.ok(cmd.startsWith("(mkdir -p '/home/me/.config/madebypless-widgets' && t=$(mktemp '/home/me/.config/madebypless-widgets/.look.XXXXXX')"))
+    assert.ok(cmd.endsWith(` > "$t" && mv -f "$t" '/home/me/.config/madebypless-widgets/look.json') </dev/null >/dev/null 2>&1 &`))
     assert.equal(Look.shellQuote("it's"), "'it'\\''s'")
+})
+
+test("readCommand differs per read, so Plasma doesn't reuse an earlier read's output", () => {
+    assert.notEqual(Look.readCommand("/d", "/d/look.json", 1), Look.readCommand("/d", "/d/look.json", 2))
+    assert.ok(Look.readCommand("/d", "/d/look.json", 1).startsWith("mkdir -p '/d' && cat "))
 })
 
 for (const widget of widgets) {

@@ -180,9 +180,9 @@ KCM.SimpleKCM {
         }
 
         QQC2.ComboBox {
-            readonly property var styles: page.editingShared ? ["square", "rounded"] : ["square", "rounded", "dot"]
+            readonly property var styles: ["square", "rounded", "dot"]
             Kirigami.FormData.label: i18n("Badge style:")
-            model: page.editingShared ? [i18n("Square"), i18n("Rounded")] : [i18n("Square"), i18n("Rounded"), i18n("Icon with status dot")]
+            model: [i18n("Square"), i18n("Rounded"), i18n("Icon with status dot")]
             currentIndex: Math.max(styles.indexOf(page.lookValue("badgeStyle")), 0)
             onActivated: index => page.setLookValue("badgeStyle", styles[index])
         }

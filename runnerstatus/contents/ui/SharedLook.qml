@@ -11,19 +11,21 @@ Item {
 
     visible: false
 
-    readonly property string dir: StandardPaths.writableLocation(StandardPaths.GenericConfigLocation).toString().replace("file://", "")
-        + "/madebypless-widgets"
+    readonly property string dir: decodeURIComponent(StandardPaths.writableLocation(StandardPaths.GenericConfigLocation)
+        .toString().replace(/^file:\/\//, "")) + "/madebypless-widgets"
     readonly property string path: dir + "/look.json"
 
     // The shared look, or null when it hasn't been saved yet.
     property var values: null
     // True once the file has been read the first time.
     property bool loaded: false
+    // Numbers the reads; see Look.readCommand().
+    property int readSeq: 0
 
     signal saved()
 
     function reload() {
-        exec.connectSource(Look.readCommand(dir, path))
+        exec.connectSource(Look.readCommand(dir, path, ++readSeq))
     }
 
     function save(look) {
@@ -43,17 +45,24 @@ Item {
                 // The folder exists now; point the watcher at it in case it was just created.
                 watcher.folder = "file://" + shared.dir
             } else {
-                shared.reload()
+                // The write carries on in the background; the folder watcher reloads once it's done.
                 shared.saved()
             }
         }
     }
 
-    // Watches the folder: saving replaces look.json, which makes the model refresh.
+    // Watches the folder: saving replaces look.json, which makes the model refresh. The read
+    // waits a moment, so it doesn't catch the folder halfway through a save.
     FolderListModel {
         id: watcher
         nameFilters: ["look.json"]
         showDirs: false
-        onStatusChanged: if (status === FolderListModel.Ready && shared.loaded) shared.reload()
+        onStatusChanged: if (status === FolderListModel.Ready && shared.loaded) reloadDelay.restart()
+    }
+
+    Timer {
+        id: reloadDelay
+        interval: 250
+        onTriggered: shared.reload()
     }
 }
