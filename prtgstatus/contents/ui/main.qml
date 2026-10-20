@@ -177,6 +177,21 @@ PlasmoidItem {
     }
 
     Plasmoid.icon: Qt.resolvedUrl("../images/logo.svg")
+
+    // The logo chosen under Appearance, or "" when none is set or its image file is gone.
+    readonly property string customLogo: logoFileProbe.status === Image.Error ? "" : Plasmoid.configuration.logoIcon
+
+    // Loads a custom logo file only to find out whether it still exists.
+    Image {
+        id: logoFileProbe
+        visible: false
+        sourceSize.width: 16
+        source: {
+            const logo = Plasmoid.configuration.logoIcon
+            return logo.startsWith("/") ? "file://" + logo : logo.startsWith("file:") ? logo : ""
+        }
+    }
+
     Plasmoid.status: down.length > 0 ? PlasmaCore.Types.NeedsAttentionStatus : PlasmaCore.Types.ActiveStatus
 
     toolTipMainText: i18n("PRTG Status")
@@ -350,7 +365,7 @@ PlasmoidItem {
             visible: bar.showLogo
             Layout.preferredWidth: bar.badgeSize
             Layout.preferredHeight: bar.badgeSize
-            source: Plasmoid.configuration.logoIcon || Plasmoid.icon
+            source: root.customLogo || Plasmoid.icon
         }
 
         Repeater {
@@ -410,7 +425,7 @@ PlasmoidItem {
             width: compact.badgeSize
             height: compact.badgeSize
             visible: !compact.showBadges
-            source: Plasmoid.configuration.showLogo && Plasmoid.configuration.logoIcon || Plasmoid.icon
+            source: Plasmoid.configuration.showLogo && root.customLogo || Plasmoid.icon
             active: compact.containsMouse
             opacity: 0.5
         }

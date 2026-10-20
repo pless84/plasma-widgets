@@ -228,6 +228,21 @@ PlasmoidItem {
     }
 
     Plasmoid.icon: "run-build"
+
+    // The logo chosen under Appearance, or "" when none is set or its image file is gone.
+    readonly property string customLogo: logoFileProbe.status === Image.Error ? "" : Plasmoid.configuration.logoIcon
+
+    // Loads a custom logo file only to find out whether it still exists.
+    Image {
+        id: logoFileProbe
+        visible: false
+        sourceSize.width: 16
+        source: {
+            const logo = Plasmoid.configuration.logoIcon
+            return logo.startsWith("/") ? "file://" + logo : logo.startsWith("file:") ? logo : ""
+        }
+    }
+
     Plasmoid.status: (stateCounts.offline || 0) > 0 || (failingJobCount > 0 && Plasmoid.configuration.showJobsInPanel)
         ? PlasmaCore.Types.NeedsAttentionStatus
         : PlasmaCore.Types.ActiveStatus
@@ -381,7 +396,7 @@ PlasmoidItem {
             visible: bar.showLogo
             Layout.preferredWidth: bar.badgeSize
             Layout.preferredHeight: bar.badgeSize
-            source: Plasmoid.configuration.logoIcon || Plasmoid.icon
+            source: root.customLogo || Plasmoid.icon
         }
 
         Repeater {
@@ -456,7 +471,7 @@ PlasmoidItem {
 
             Kirigami.Icon {
                 anchors.fill: parent
-                source: Plasmoid.configuration.showLogo && Plasmoid.configuration.logoIcon || Plasmoid.icon
+                source: Plasmoid.configuration.showLogo && root.customLogo || Plasmoid.icon
                 active: compact.containsMouse
             }
 
