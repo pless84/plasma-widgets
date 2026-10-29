@@ -7,7 +7,7 @@
             }
         ],
         "Category": "System Information",
-        "Description": "Local LLM servers as status badges: an Ollama or LM Studio server's loaded and installed models plus this computer's GPU load, or the LLM servers (Ollama, MLX) from a Mac server dashboard's /api/status",
+        "Description": "Local LLM servers as status badges: an Ollama or LM Studio server's loaded and installed models plus this computer's GPU load",
         "Icon": "cpu",
         "Id": "dk.madebypless.llmstatus",
         "License": "GPL-2.0-or-later",

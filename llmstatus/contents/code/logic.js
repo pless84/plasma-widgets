@@ -2,11 +2,10 @@
 // The LLM Status widget's logic, kept free of Plasma and i18n so it can be unit-tested
 // (tests/widgets/llmstatus.test.mjs). main.qml imports it as Logic.
 //
-// Every source ends up as the same "llm" block, the shape the Mac server dashboard's
-// /api/status uses: {gpu: {util, alloc_gb, mem_used_gb, mem_total_gb, name}, memory,
+// Both sources end up as the same "llm" block: {gpu: {util, mem_used_gb, mem_total_gb, temp_c, …, name},
 // ollama: {up, error, version, models: [{name, size_gb, vram_gb, expires, params, quant, context}],
-// installed: [{name, size_gb, params, quant, capabilities}], requests: [{time, secs, status}]}, mlx: [...]}.
-// An LM Studio server fills `lmstudio` (same shape as `ollama`) instead of `ollama`.
+// installed: [{name, size_gb, params, quant, capabilities}]}}. An LM Studio server fills
+// `lmstudio` (same shape) instead of `ollama`.
 
 // GPU load (percent) at or above which the status badge shows as "GPU busy" (while a model is
 // loaded). The GPU may be shared with other programs, so this is not proof that a model is
@@ -29,16 +28,6 @@ function formatDuration(seconds) {
 // Bytes as gigabytes with one decimal, e.g. 8149190253 → 8.1.
 function gigabytes(bytes) {
     return Math.round((bytes || 0) / 1e8) / 10
-}
-
-// The last part of a model path, e.g. "Org/Model-8bit" → "Model-8bit".
-function shortModel(name) {
-    return String(name || "").split("/").pop()
-}
-
-// The newest request's time from a list of {time}, or 0.
-function lastRequestTime(requests) {
-    return (requests || []).reduce((latest, r) => Math.max(latest, r.time || 0), 0)
 }
 
 // A number as a context size: 8192 → "8k", 131072 → "128k", 1048576 → "1M". "" when unknown.
@@ -106,18 +95,6 @@ function isLocalHost(url) {
     return host === "localhost" || host === "[::1]" || /^127(\.\d{1,3}){3}$/.test(host)
 }
 
-// The newest of a list of {time, secs, status} as {time, secs, status, failed} (failed: HTTP 400
-// or above), or null without requests. secs and status are null when not reported.
-function latestRequest(requests) {
-    const newest = (requests || []).reduce((best, r) => !best || (r.time || 0) > (best.time || 0) ? r : best, null)
-    if (!newest) {
-        return null
-    }
-    const status = typeof newest.status === "number" ? newest.status : null
-    return { time: newest.time || 0, secs: typeof newest.secs === "number" ? newest.secs : null,
-             status: status, failed: status !== null && status >= 400 }
-}
-
 // One process_name from nvidia-smi as the program's name: "/usr/lib/firefox/firefox" → "firefox".
 function processName(path) {
     return String(path || "").trim().split("/").pop()
@@ -133,7 +110,7 @@ function isLlmServerProcess(path) {
 // name" line per GPU (older: "util, used MiB, total MiB, name"; unreported values are empty or
 // "[N/A]"), then optionally "# apps" and a "pid, process, used MiB" line per compute process.
 // Several GPUs count as one: the busiest one's load and hottest temperature, their memory and
-// power added up. `apps` lists the programs using GPU memory other than Ollama, biggest first.
+// power added up. `apps` lists the programs using GPU memory other than Ollama and LM Studio, biggest first.
 // Null without a GPU.
 function parseGpu(text) {
     const lines = String(text || "").split("\n")
@@ -208,10 +185,8 @@ function fromOllama(version, ps, tags, gpu, error) {
         : []
     return {
         gpu: gpu,
-        memory: null,
         ollama: { up: up, error: up ? "" : (error || "Not responding"), version: version ? version.version || "" : "",
-                  models: models, installed: installed },
-        mlx: []
+                  models: models, installed: installed }
     }
 }
 
@@ -261,14 +236,12 @@ function fromLmStudio(reply, gpu, error, now) {
         .sort((a, b) => a.name.localeCompare(b.name))
     return {
         gpu: gpu,
-        memory: null,
-        ollama: null,
-        lmstudio: { up: up, error: up ? "" : (error || "Not responding"), version: "", models: models, installed: installed },
-        mlx: []
+        lmstudio: { up: up, error: up ? "" : (error || "Not responding"), version: "", models: models, installed: installed }
     }
 }
 
-// Ollama, LM Studio and every MLX server as one list: {key, kind, name, up, …}. Empty without LLM data.
+// The Ollama or LM Studio server as a list of one: {key, kind, name, up, error, version, models,
+// installed}. Empty without LLM data.
 function llmServers(llm) {
     if (!llm) {
         return []
@@ -279,15 +252,9 @@ function llmServers(llm) {
         if (o) {
             servers.push({ key: kind, kind: kind, name: name, up: !o.error && !!o.up,
                 error: o.error || "", version: o.version || "", models: o.models || [],
-                installed: o.installed || [], lastRequest: lastRequestTime(o.requests), request: latestRequest(o.requests) })
+                installed: o.installed || [] })
         }
     })
-    if (Array.isArray(llm.mlx)) {
-        llm.mlx.forEach(s => servers.push({ key: s.label || s.model || "mlx", kind: "mlx",
-            name: shortModel(s.model) || s.label || "MLX", up: !!s.up, label: s.label || "",
-            footprintGb: s.footprint_gb, promptCache: s.prompt_cache, uptime: s.uptime,
-            lastRequest: lastRequestTime(s.requests), request: latestRequest(s.requests) }))
-    }
     return servers
 }
 
@@ -304,33 +271,18 @@ function llmState(llm) {
     return util >= BUSY_PERCENT && loadedCount(llm) > 0 ? "busy" : "idle"
 }
 
-// Whether a server reports its own loaded and installed models (Ollama, LM Studio), unlike an
-// MLX server, which is one model.
-function hasModelList(server) {
-    return !!server && (server.kind === "ollama" || server.kind === "lmstudio")
-}
-
-// Models loaded in memory: Ollama's and LM Studio's, plus one per running MLX server.
+// Models loaded in memory.
 function loadedCount(llm) {
-    return llmServers(llm).reduce((n, s) => n + (!s.up ? 0 : hasModelList(s) ? s.models.length : 1), 0)
+    return llmServers(llm).reduce((n, s) => n + (s.up ? s.models.length : 0), 0)
 }
 
 // How much of a loaded model sits in GPU memory, in percent (Ollama splits big models
-// between GPU and CPU), or null when unknown. Uses the dashboard's own figure (gpu_pct) when
-// there is one, else the exact byte sizes, else the GB sizes.
+// between GPU and CPU), or null when unknown. Uses the exact byte sizes, else the GB sizes.
 function gpuPercent(model) {
-    if (typeof model.gpu_pct === "number" && !isNaN(model.gpu_pct)) {
-        return Math.round(model.gpu_pct)
-    }
     if (model.size > 0) {
         return Math.floor(model.size_vram / model.size * 100)
     }
     return model.size_gb > 0 && typeof model.vram_gb === "number" ? Math.round(model.vram_gb / model.size_gb * 100) : null
-}
-
-// Swap use in percent, or null when unknown.
-function swapPercent(memory) {
-    return memory && memory.swap_total_gb ? Math.round(memory.swap_used_gb / memory.swap_total_gb * 100) : null
 }
 
 // Servers that went down since the previous check, for notifications. `previous` is the

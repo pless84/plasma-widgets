@@ -5,7 +5,7 @@
   <kcfgfile name=""/>
   <group name="General">
     <entry name="source" type="String">
-      <label>Where the status comes from: "ollama" (an Ollama server's API), "lmstudio" (an LM Studio server's API) or "dashboard" (a Mac server dashboard's /api/status)</label>
+      <label>Where the status comes from: "ollama" (an Ollama server's API) or "lmstudio" (an LM Studio server's API)</label>
       <default>ollama</default>
     </entry>
     <entry name="ollamaUrl" type="String">
@@ -16,12 +16,8 @@
       <label>Address of the LM Studio server (its /api/v1/models is read)</label>
       <default>http://localhost:1234</default>
     </entry>
-    <entry name="dashboardUrl" type="String">
-      <label>Address of the Mac server dashboard (its /api/status is read)</label>
-      <default></default>
-    </entry>
     <entry name="showGpu" type="Bool">
-      <label>Read the GPU load on this computer (NVIDIA through nvidia-smi, or AMD); Ollama and LM Studio sources only</label>
+      <label>Read the GPU load on this computer (NVIDIA through nvidia-smi, or AMD) while the server runs on it</label>
       <default>true</default>
     </entry>
     <entry name="pollInterval" type="Int">

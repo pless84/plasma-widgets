@@ -14,7 +14,7 @@ KDE Plasma 6 widgets for keeping an eye on GitHub, PRTG, Docker, Bugsink, Sentry
 | [Sentry Status](sentrystatus) | `dk.madebypless.sentrystatus` | Status badges for your Sentry issues (new, open, archived, resolved), with the unresolved issues per project and resolve / archive buttons |
 | [Dokploy Status](dokploystatus) | `dk.madebypless.dokploystatus` | Status badges for your Dokploy applications, Compose stacks and databases (failed, deploying, deployed, idle), with deploy / start / stop buttons |
 | [Runner Status](runnerstatus) | `dk.madebypless.runnerstatus` | Status badges for self-hosted GitHub Actions runners (offline, busy, idle) and scheduled jobs (e.g. backups) from a [Mac server dashboard](https://github.com/pless84/mac-server-dashboard)'s `/api/status`, with the running job and last result per runner |
-| [LLM Status](llmstatus) | `dk.madebypless.llmstatus` | A status badge with the GPU load and a loaded-models badge for an Ollama or LM Studio server (on this computer or another), with its loaded and installed models; or the LLM servers (Ollama, MLX) from a Mac server dashboard |
+| [LLM Status](llmstatus) | `dk.madebypless.llmstatus` | A status badge with the GPU load and a loaded-models badge for an Ollama or LM Studio server (on this computer or another), with its loaded and installed models |
 
 Every badge widget offers square or rounded badges, adjustable colours, a choice of which states get a badge, and an optional logo in front of the badges in the panel (any icon, or an image file such as a downloaded logo). Find these under **Appearance** and **General** in the widget's settings.
 
@@ -114,8 +114,6 @@ Self-hosted GitHub Actions runners, read from a [Mac server dashboard](https://g
 
 The widget checks every 15 seconds by default and notifies you when a runner goes offline or a job fails. A runner the dashboard reports as anything other than idle or busy counts as offline.
 
-Local LLMs (Ollama, MLX) that the dashboard reports are shown by the [LLM Status](#llm-status) widget.
-
 If the dashboard reports scheduled jobs (LaunchAgents that run on a schedule, such as a nightly backup), the popup gains a **Scheduled jobs** section: each job's schedule, when it last ran, when it runs next and the newest line of its log. While a job has failed (its last exit code isn't 0) or missed a scheduled run, the panel shows a red badge with the number of such jobs, and you get a notification when a job starts failing or fails again on a later run. Both can be turned off under **General**.
 
 A running job shows how long that job usually takes and turns amber when it runs far longer (optionally with a notification). Under the job you see its run number, branch, trigger and who started it. An offline runner says why ("service not loaded", or crashed with its exit code). The host line shows load per CPU core and turns red when free disk drops below 10% (with a notification), each runner shows the size of its work folder and its recent results ("9/10 passed"), and warnings count only the last 24 hours, with the newest one shown.
@@ -134,8 +132,6 @@ Click for the server's version and address, each loaded model's size, how much o
 <img src="screenshots/llmstatus-popup.png" width="436" alt="LLM Status popup: Ollama 0.34.1 up on localhost with 13 models installed, no model loaded, the installed models collapsed, and the GPU's load and memory along the bottom">
 
 Under **General** you can switch the source to an **LM Studio server** (`http://localhost:1234` by default; start it with `lms server start`). The widget then reads LM Studio's `/api/v1/models`: the loaded models with their context and unload time, and the downloaded models, including models on other devices reached through [LM Link](https://lmstudio.ai/docs/lmlink). LM Studio doesn't say how much of a model sits on the GPU or which device holds it, so those details are left out.
-
-You can also switch the source to a [Mac server dashboard](https://github.com/pless84/mac-server-dashboard) instead: the widget then shows the LLM servers it reports (Ollama and MLX) with the Mac's GPU, RAM and swap use, as Runner Status used to.
 
 Loaded models show their size, quantization and context length ("12.2B · Q4_K_M · ctx 8k") and installed models their size and capabilities. The GPU line shows Ollama's own share of the video memory next to the whole card, plus temperature and power; when a model doesn't fit on the GPU, it lists which other programs use GPU memory. The status only turns busy while a model is loaded, so a game or video on the same GPU doesn't count, and a model shows "in use" right after it served a request.
 
