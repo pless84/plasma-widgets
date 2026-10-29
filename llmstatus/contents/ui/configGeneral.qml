@@ -9,6 +9,7 @@ KCM.SimpleKCM {
 
     property string cfg_source
     property alias cfg_ollamaUrl: ollamaUrl.text
+    property alias cfg_lmstudioUrl: lmstudioUrl.text
     property alias cfg_dashboardUrl: dashboardUrl.text
     property alias cfg_showGpu: showGpu.checked
     property alias cfg_pollInterval: pollInterval.value
@@ -17,26 +18,37 @@ KCM.SimpleKCM {
     property alias cfg_showZeroInPanel: showZeroInPanel.checked
     property alias cfg_notifyOnDown: notifyOnDown.checked
 
+    // The Source box's entries, in order.
+    readonly property var sources: ["ollama", "lmstudio", "dashboard"]
+    readonly property int sourceIndex: Math.max(0, sources.indexOf(cfg_source))
     readonly property bool fromDashboard: cfg_source === "dashboard"
+    readonly property bool fromLmStudio: cfg_source === "lmstudio"
 
     Kirigami.FormLayout {
         QQC2.ComboBox {
             Kirigami.FormData.label: i18n("Source:")
-            model: [i18n("Ollama server"), i18n("Mac server dashboard")]
-            currentIndex: page.fromDashboard ? 1 : 0
+            model: [i18n("Ollama server"), i18n("LM Studio server"), i18n("Mac server dashboard")]
+            currentIndex: page.sourceIndex
             onActivated: index => {
-                page.cfg_source = index === 1 ? "dashboard" : "ollama"
+                page.cfg_source = page.sources[index]
                 // Choosing breaks the binding above; restore it so Defaults still updates the box.
-                currentIndex = Qt.binding(() => page.fromDashboard ? 1 : 0)
+                currentIndex = Qt.binding(() => page.sourceIndex)
             }
         }
 
         QQC2.TextField {
             id: ollamaUrl
-            visible: !page.fromDashboard
+            visible: !page.fromDashboard && !page.fromLmStudio
             Kirigami.FormData.label: i18n("Ollama address:")
             Layout.fillWidth: true
             placeholderText: "http://localhost:11434"
+        }
+        QQC2.TextField {
+            id: lmstudioUrl
+            visible: page.fromLmStudio
+            Kirigami.FormData.label: i18n("LM Studio address:")
+            Layout.fillWidth: true
+            placeholderText: "http://localhost:1234"
         }
         QQC2.CheckBox {
             id: showGpu
@@ -59,6 +71,8 @@ KCM.SimpleKCM {
             opacity: 0.7
             text: page.fromDashboard
                 ? i18n("Reads the LLM servers (Ollama and MLX), GPU and memory from the dashboard's /api/status.")
+                : page.fromLmStudio
+                ? i18n("Reads LM Studio's API (/api/v1/models): the loaded and downloaded models, including models on other devices reached through LM Link. Start its server with \"lms server start\".")
                 : i18n("Reads Ollama's API: the version, the models loaded in memory and the installed models. Use localhost for Ollama on this computer, or another machine's address.")
         }
 

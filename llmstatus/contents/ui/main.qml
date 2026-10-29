@@ -15,11 +15,14 @@ PlasmoidItem {
     id: root
 
     readonly property string codeDir: Qt.resolvedUrl("../code/").toString().replace("file://", "")
-    // "ollama": talk to an Ollama server directly. "dashboard": read a Mac server dashboard.
+    // "ollama": talk to an Ollama server directly. "lmstudio": an LM Studio server.
+    // "dashboard": read a Mac server dashboard.
     readonly property bool fromDashboard: Plasmoid.configuration.source === "dashboard"
-    readonly property string serverUrl: (fromDashboard ? Plasmoid.configuration.dashboardUrl : Plasmoid.configuration.ollamaUrl)
+    readonly property bool fromLmStudio: Plasmoid.configuration.source === "lmstudio"
+    readonly property string serverUrl: (fromDashboard ? Plasmoid.configuration.dashboardUrl
+        : fromLmStudio ? Plasmoid.configuration.lmstudioUrl : Plasmoid.configuration.ollamaUrl)
         .trim().replace(/\/+$/, "")
-    // gpu.sh reads this computer's GPU, so it says nothing about an Ollama server on another host.
+    // gpu.sh reads this computer's GPU, so it says nothing about a server on another host.
     readonly property bool readGpu: !fromDashboard && Plasmoid.configuration.showGpu && Logic.isLocalHost(serverUrl)
 
     // The status as an "llm" block (see logic.js), or null before the first check.
@@ -43,7 +46,9 @@ PlasmoidItem {
     property var pendingPs: null
     property var pendingTags: null
     property var pendingGpu: null
-    // What Logic.trackUsage() returned last time (Ollama only): when each loaded model was last used.
+    // LM Studio's /api/v1/models reply during an LM Studio check.
+    property var pendingModels: null
+    // What Logic.trackUsage() returned last time (Ollama and LM Studio): when each loaded model was last used.
     property var usage: null
 
     readonly property var servers: Logic.llmServers(llm)
@@ -51,9 +56,10 @@ PlasmoidItem {
     readonly property int loadedCount: Logic.loadedCount(llm)
     readonly property var gpu: llm ? llm.gpu : null
     readonly property bool hasGpuLoad: !!gpu && gpu.util !== null && gpu.util !== undefined
-    readonly property var ollama: servers.find(s => s.kind === "ollama") || null
-    readonly property var loadedModels: ollama && ollama.up ? ollama.models : []
-    readonly property var installedModels: ollama && ollama.up ? ollama.installed : []
+    // The Ollama or LM Studio server, whose loaded and installed models are listed.
+    readonly property var modelServer: servers.find(s => Logic.hasModelList(s)) || null
+    readonly property var loadedModels: modelServer && modelServer.up ? modelServer.models : []
+    readonly property var installedModels: modelServer && modelServer.up ? modelServer.installed : []
     readonly property bool badgeMode: root.look.badgeStyle !== "dot"
 
     // The panel badges: the status (GPU load, coloured by server state) and the loaded models.
@@ -71,8 +77,9 @@ PlasmoidItem {
     readonly property var badges: [statusBadge, loadedBadge].filter(b => b)
 
     readonly property bool gpuHot: !!gpu && gpu.temp_c >= Logic.TEMP_WARN
-    // Ollama's own share of the GPU memory: the card is shared with other programs.
-    readonly property var ollamaVramGb: gpu && gpu.mem_total_gb ? Logic.ollamaVramGb(loadedModels) : null
+    // Ollama's own share of the GPU memory: the card is shared with other programs. LM Studio doesn't report it.
+    readonly property var ollamaVramGb: gpu && gpu.mem_total_gb && modelServer && modelServer.kind === "ollama"
+        ? Logic.ollamaVramGb(loadedModels) : null
     // Programs other than Ollama using GPU memory, when a loaded model doesn't fit on the GPU completely.
     readonly property string spillText: {
         if (!gpu || !gpu.apps || gpu.apps.length === 0) return ""
@@ -99,7 +106,8 @@ PlasmoidItem {
     }
 
     readonly property string summary: {
-        if (!serverUrl) return fromDashboard ? i18n("Set the dashboard address in the settings") : i18n("Set the Ollama address in the settings")
+        if (!serverUrl) return fromDashboard ? i18n("Set the dashboard address in the settings")
+            : fromLmStudio ? i18n("Set the LM Studio address in the settings") : i18n("Set the Ollama address in the settings")
         if (!loaded) return i18n("Checking LLMs…")
         if (servers.length === 0) return i18n("The dashboard reports no LLM servers")
         const down = servers.filter(s => !s.up).length
@@ -197,13 +205,30 @@ PlasmoidItem {
             })
             return
         }
-        // Ollama: three API calls, plus the GPU when it's read; apply once all have answered.
-        pendingLeft = readGpu ? 4 : 3
         pendingVersion = null
         pendingVersionStatus = 0
         pendingPs = null
         pendingTags = null
+        pendingModels = null
         pendingGpu = null
+        if (readGpu) {
+            gpuReader.connectSource("sh " + Look.shellQuote(codeDir + "gpu.sh") + " # " + id)
+        }
+        if (fromLmStudio) {
+            // LM Studio: one API call (its model list says which are loaded), plus the GPU when it's read.
+            pendingLeft = readGpu ? 2 : 1
+            getJson(serverUrl + "/api/v1/models", (data, status) => {
+                if (id !== checkId) return
+                pendingModels = data
+                // Stands in for Ollama's /api/version: whether the server answered.
+                pendingVersion = data && Array.isArray(data.models) ? data : null
+                pendingVersionStatus = status
+                ollamaAnswered(id)
+            })
+            return
+        }
+        // Ollama: three API calls, plus the GPU when it's read; apply once all have answered.
+        pendingLeft = readGpu ? 4 : 3
         getJson(serverUrl + "/api/version", (data, status) => {
             if (id !== checkId) return
             pendingVersion = data
@@ -220,9 +245,6 @@ PlasmoidItem {
             pendingTags = data
             ollamaAnswered(id)
         })
-        if (readGpu) {
-            gpuReader.connectSource("sh " + Look.shellQuote(codeDir + "gpu.sh") + " # " + id)
-        }
     }
 
     function gpuAnswered(id, text) {
@@ -231,7 +253,7 @@ PlasmoidItem {
         ollamaAnswered(id)
     }
 
-    // One reply of an Ollama check is in; once all are, turn them into the status.
+    // One reply of an Ollama or LM Studio check is in; once all are, turn them into the status.
     function ollamaAnswered(id) {
         if (id !== checkId || --pendingLeft > 0) return
         finishCheck()
@@ -249,14 +271,17 @@ PlasmoidItem {
         errorText = ""
         serverNow = Date.now() / 1000
         host = null
-        apply(Logic.fromOllama(pendingVersion, pendingPs, pendingTags, pendingGpu, error))
+        apply(fromLmStudio ? Logic.fromLmStudio(pendingModels, pendingGpu, error, serverNow)
+            : Logic.fromOllama(pendingVersion, pendingPs, pendingTags, pendingGpu, error))
     }
 
     function apply(block) {
         const result = Logic.llmChanges(block, llmSnapshot)
         if (!fromDashboard) {
-            // A failed /api/ps says nothing about the models, so it must not wipe what was tracked.
-            usage = block.ollama.up ? Logic.trackUsage(usage, pendingPs ? block.ollama.models : null, serverNow) : null
+            // A failed model list says nothing about the models, so it must not wipe what was tracked.
+            const server = block.ollama || block.lmstudio
+            const listed = fromLmStudio ? pendingModels : pendingPs
+            usage = server.up ? Logic.trackUsage(usage, listed ? server.models : null, serverNow) : null
         }
         llm = block
         llmSnapshot = result.snapshot
@@ -735,7 +760,7 @@ PlasmoidItem {
                                 text: {
                                     const s = serverItem.modelData
                                     if (!s.up) return s.error || i18n("Not responding")
-                                    if (s.kind === "ollama") return ""
+                                    if (Logic.hasModelList(s)) return ""
                                     return [
                                         s.footprintGb !== null && s.footprintGb !== undefined ? i18n("%1 GB in memory", s.footprintGb) : "",
                                         s.promptCache ? i18n("prompt cache %1 GB", s.promptCache.gb) : "",
@@ -754,9 +779,9 @@ PlasmoidItem {
                                 text: {
                                     const s = serverItem.modelData
                                     return [
-                                        s.kind === "ollama" ? (s.version ? "v" + s.version : "") : s.label,
-                                        s.kind === "ollama" && !root.fromDashboard ? root.serverUrl : "",
-                                        s.kind === "ollama" && s.up && s.installed.length > 0
+                                        Logic.hasModelList(s) ? (s.version ? "v" + s.version : "") : s.label,
+                                        Logic.hasModelList(s) && !root.fromDashboard ? root.serverUrl : "",
+                                        Logic.hasModelList(s) && s.up && s.installed.length > 0
                                             ? i18np("%1 model installed", "%1 models installed", s.installed.length) : "",
                                         s.kind === "mlx" && s.up && s.uptime ? i18n("up %1", Logic.formatDuration(s.uptime)) : "",
                                         root.requestText(s),
@@ -767,10 +792,10 @@ PlasmoidItem {
                     }
                 }
 
-                // ---- Ollama's loaded models ----
+                // ---- Ollama's or LM Studio's loaded models ----
                 GroupHeader {
                     id: loadedHeader
-                    visible: root.ollama !== null && root.ollama.up && !root.errorText
+                    visible: root.modelServer !== null && root.modelServer.up && !root.errorText
                     groupKey: "loaded"
                     text: i18n("Loaded models")
                 }
@@ -781,7 +806,7 @@ PlasmoidItem {
                     Layout.leftMargin: Kirigami.Units.largeSpacing
                     visible: loadedHeader.visible && !loadedHeader.collapsed && root.loadedModels.length === 0
                     opacity: 0.7
-                    text: i18n("No model loaded. Ollama loads one on its first request.")
+                    text: root.modelServer ? i18n("No model loaded. %1 loads one on its first request.", root.modelServer.name) : ""
                     wrapMode: Text.WordWrap
                 }
 
@@ -859,7 +884,7 @@ PlasmoidItem {
                     }
                 }
 
-                // ---- Ollama's installed models ----
+                // ---- Ollama's or LM Studio's installed models ----
                 GroupHeader {
                     id: installedHeader
                     visible: root.installedModels.length > 0 && !root.errorText

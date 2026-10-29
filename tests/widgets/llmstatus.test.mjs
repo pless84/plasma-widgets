@@ -251,3 +251,65 @@ test("trackUsage: a later expiry than last time means the model was used", () =>
     assert.deepEqual(L.trackUsage(used, [at("2026-10-20T10:08:00+02:00")], 1090).used, { m: 1060 })
     assert.deepEqual(L.trackUsage(used, [], 1090).used, {})
 })
+
+// LM Studio's /api/v1/models reply, trimmed from this machine (the Nomic model is on three devices over LM Link).
+const lmModels = { models: [
+    { type: "llm", key: "qwen2.5-coder-7b-instruct", size_bytes: 4683074048, params_string: "7B",
+      quantization: { name: "Q4_K_M", bits_per_weight: 4 }, capabilities: { vision: false, trained_for_tool_use: false },
+      loaded_instances: [{ id: "qwen2.5-coder-7b-instruct", config: { context_length: 8192 }, remaining_ttl_seconds: 3382 }] },
+    { type: "embedding", key: "text-embedding-nomic-embed-text-v1.5", size_bytes: 84106624, params_string: null,
+      quantization: { name: "Q4_K_M" }, loaded_instances: [] },
+    { type: "llm", key: "qwen3-30b-a3b-arliai-rpr-v4-fast-mlx", size_bytes: 32456750575, params_string: "30B",
+      quantization: { name: "8bit" }, capabilities: { vision: false, trained_for_tool_use: true }, loaded_instances: [] },
+    { type: "embedding", key: "text-embedding-nomic-embed-text-v1.5", size_bytes: 84106624, loaded_instances: [] },
+] }
+
+test("fromLmStudio: loaded instances, unload time and downloaded models listed once", () => {
+    const now = 1793257000
+    const block = L.fromLmStudio(lmModels, null, "", now)
+    assert.equal(block.ollama, null)
+    const servers = L.llmServers(block)
+    assert.deepEqual(servers.map(s => [s.key, s.name, s.up]), [["lmstudio", "LM Studio", true]])
+    assert.equal(L.hasModelList(servers[0]), true)
+    const [m] = block.lmstudio.models
+    assert.equal(m.name, "qwen2.5-coder-7b-instruct")
+    assert.equal(m.size_gb, 4.7)
+    assert.equal(m.context, 8192)
+    assert.equal(L.parseTime(m.expires), now + 3382)
+    assert.equal(L.gpuPercent(m), null)
+    assert.equal(L.modelDetails(m).join(" · "), "7B · Q4_K_M")
+    assert.deepEqual(block.lmstudio.installed.map(i => [i.name, i.capabilities]), [
+        ["qwen2.5-coder-7b-instruct", []],
+        ["qwen3-30b-a3b-arliai-rpr-v4-fast-mlx", ["tools"]],
+        ["text-embedding-nomic-embed-text-v1.5", ["embedding"]],
+    ])
+    assert.equal(L.loadedCount(block), 1)
+    assert.equal(L.llmState(block), "idle")
+})
+
+test("fromLmStudio: no reply or an unexpected one is down, with the reason", () => {
+    const down = L.fromLmStudio(null, null, "Can't reach http://localhost:1234", 0)
+    assert.equal(down.lmstudio.up, false)
+    assert.equal(down.lmstudio.error, "Can't reach http://localhost:1234")
+    assert.deepEqual(down.lmstudio.installed, [])
+    assert.equal(L.llmState(down), "down")
+    assert.equal(L.fromLmStudio({ error: "Unexpected endpoint" }, null, "", 0).lmstudio.up, false)
+})
+
+test("fromLmStudio: a request restarts the countdown, which trackUsage reads as used", () => {
+    const first = L.fromLmStudio(lmModels, null, "", 1000)
+    const usage = L.trackUsage(null, first.lmstudio.models, 1000)
+    // 10 s later the TTL is back at its start: the model served a request.
+    const second = L.fromLmStudio(lmModels, null, "", 1010)
+    const after = L.trackUsage(usage, second.lmstudio.models, 1010)
+    assert.equal(L.modelInUse(after, "qwen2.5-coder-7b-instruct", 1010), true)
+    // Counting down as usual: not used.
+    const idle = { models: [{ ...lmModels.models[0], loaded_instances: [{ id: "qwen2.5-coder-7b-instruct", remaining_ttl_seconds: 3372 }] }] }
+    const still = L.trackUsage(usage, L.fromLmStudio(idle, null, "", 1010).lmstudio.models, 1010)
+    assert.equal(L.modelInUse(still, "qwen2.5-coder-7b-instruct", 1010), false)
+})
+
+test("parseGpu: LM Studio's own engine isn't another program", () => {
+    const gpu = L.parseGpu("3, 6000, 16376, 45, 30, 200, RTX\n# apps\n1670732, /home/jap/.lmstudio/extensions/backends/llama.cpp-linux-x86_64-nvidia-cuda12-avx2-2.41.0/llama-server, 4944\n3543, /usr/bin/warp-terminal, 234")
+    assert.deepEqual(gpu.apps, [{ name: "warp-terminal", used_gb: 0.2 }])
+})

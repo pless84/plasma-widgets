@@ -2,10 +2,11 @@
 // The LLM Status widget's logic, kept free of Plasma and i18n so it can be unit-tested
 // (tests/widgets/llmstatus.test.mjs). main.qml imports it as Logic.
 //
-// Both sources end up as the same "llm" block, the shape the Mac server dashboard's
+// Every source ends up as the same "llm" block, the shape the Mac server dashboard's
 // /api/status uses: {gpu: {util, alloc_gb, mem_used_gb, mem_total_gb, name}, memory,
 // ollama: {up, error, version, models: [{name, size_gb, vram_gb, expires, params, quant, context}],
 // installed: [{name, size_gb, params, quant, capabilities}], requests: [{time, secs, status}]}, mlx: [...]}.
+// An LM Studio server fills `lmstudio` (same shape as `ollama`) instead of `ollama`.
 
 // GPU load (percent) at or above which the status badge shows as "GPU busy" (while a model is
 // loaded). The GPU may be shared with other programs, so this is not proof that a model is
@@ -122,6 +123,12 @@ function processName(path) {
     return String(path || "").trim().split("/").pop()
 }
 
+// Whether a GPU process is an LLM server this widget shows itself: Ollama, or LM Studio's
+// engine (installed under ~/.lmstudio, e.g. ".../backends/llama.cpp-…/llama-server").
+function isLlmServerProcess(path) {
+    return processName(path).toLowerCase().startsWith("ollama") || String(path || "").includes("/.lmstudio/")
+}
+
 // The GPU from gpu.sh's output: one "util, used MiB, total MiB, temperature, power, power limit,
 // name" line per GPU (older: "util, used MiB, total MiB, name"; unreported values are empty or
 // "[N/A]"), then optionally "# apps" and a "pid, process, used MiB" line per compute process.
@@ -155,8 +162,9 @@ function parseGpu(text) {
     ;(appsAt < 0 ? [] : lines.slice(appsAt + 1)).map(line => line.split(",").map(part => part.trim()))
         .filter(parts => parts.length >= 3 && isNumber(parts[parts.length - 1]))
         .forEach(parts => {
-            const name = processName(parts.slice(1, -1).join(","))
-            if (name && !name.toLowerCase().startsWith("ollama")) {
+            const path = parts.slice(1, -1).join(",")
+            const name = processName(path)
+            if (name && !isLlmServerProcess(path)) {
                 byName[name] = (byName[name] || 0) + Number(parts[parts.length - 1])
             }
         })
@@ -207,18 +215,73 @@ function fromOllama(version, ps, tags, gpu, error) {
     }
 }
 
-// Ollama and every MLX server as one list: {key, kind, name, up, …}. Empty without LLM data.
+// LM Studio's capabilities object ({vision: true, trained_for_tool_use: true}) as a list like
+// Ollama's: ["vision", "tools"].
+function lmStudioCapabilities(caps) {
+    if (!caps || typeof caps !== "object") {
+        return []
+    }
+    return [caps.vision ? "vision" : "", caps.trained_for_tool_use ? "tools" : ""].filter(c => c)
+}
+
+// The "llm" block for an LM Studio server, from its /api/v1/models reply (parsed JSON, or null
+// when the request failed), the GPU (or null) and `now` in seconds. Each loaded instance is a
+// loaded model; its unload time comes from remaining_ttl_seconds (LM Studio restarts that
+// countdown on every request, like Ollama's expires_at). Models reached over LM Link are listed
+// too, but the API doesn't say which device holds them or how much of a model is on the GPU.
+// A model on several devices is listed once.
+function fromLmStudio(reply, gpu, error, now) {
+    const up = !!reply && Array.isArray(reply.models) && !error
+    const list = up ? reply.models : []
+    const models = []
+    list.forEach(m => {
+        (m.loaded_instances || []).forEach(inst => {
+            const ttl = inst.remaining_ttl_seconds
+            models.push({
+                name: inst.id || m.key || "",
+                size_gb: gigabytes(m.size_bytes),
+                vram_gb: null,
+                size: 0,
+                size_vram: 0,
+                expires: typeof ttl === "number" ? new Date((now + ttl) * 1000).toISOString() : "",
+                params: m.params_string || "",
+                quant: (m.quantization || {}).name || "",
+                context: (inst.config || {}).context_length || 0
+            })
+        })
+    })
+    const seen = {}
+    const installed = list.filter(m => {
+        const fresh = m.key && !seen[m.key]
+        seen[m.key] = true
+        return fresh
+    }).map(m => ({ name: m.key, size_gb: gigabytes(m.size_bytes), params: m.params_string || "",
+        quant: (m.quantization || {}).name || "",
+        capabilities: (m.type === "embedding" ? ["embedding"] : []).concat(lmStudioCapabilities(m.capabilities)) }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    return {
+        gpu: gpu,
+        memory: null,
+        ollama: null,
+        lmstudio: { up: up, error: up ? "" : (error || "Not responding"), version: "", models: models, installed: installed },
+        mlx: []
+    }
+}
+
+// Ollama, LM Studio and every MLX server as one list: {key, kind, name, up, …}. Empty without LLM data.
 function llmServers(llm) {
     if (!llm) {
         return []
     }
     const servers = []
-    const o = llm.ollama
-    if (o) {
-        servers.push({ key: "ollama", kind: "ollama", name: "Ollama", up: !o.error && !!o.up,
-            error: o.error || "", version: o.version || "", models: o.models || [],
-            installed: o.installed || [], lastRequest: lastRequestTime(o.requests), request: latestRequest(o.requests) })
-    }
+    ;[["ollama", "Ollama"], ["lmstudio", "LM Studio"]].forEach(([kind, name]) => {
+        const o = llm[kind]
+        if (o) {
+            servers.push({ key: kind, kind: kind, name: name, up: !o.error && !!o.up,
+                error: o.error || "", version: o.version || "", models: o.models || [],
+                installed: o.installed || [], lastRequest: lastRequestTime(o.requests), request: latestRequest(o.requests) })
+        }
+    })
     if (Array.isArray(llm.mlx)) {
         llm.mlx.forEach(s => servers.push({ key: s.label || s.model || "mlx", kind: "mlx",
             name: shortModel(s.model) || s.label || "MLX", up: !!s.up, label: s.label || "",
@@ -241,9 +304,15 @@ function llmState(llm) {
     return util >= BUSY_PERCENT && loadedCount(llm) > 0 ? "busy" : "idle"
 }
 
-// Models loaded in memory: Ollama's, plus one per running MLX server.
+// Whether a server reports its own loaded and installed models (Ollama, LM Studio), unlike an
+// MLX server, which is one model.
+function hasModelList(server) {
+    return !!server && (server.kind === "ollama" || server.kind === "lmstudio")
+}
+
+// Models loaded in memory: Ollama's and LM Studio's, plus one per running MLX server.
 function loadedCount(llm) {
-    return llmServers(llm).reduce((n, s) => n + (!s.up ? 0 : s.kind === "ollama" ? s.models.length : 1), 0)
+    return llmServers(llm).reduce((n, s) => n + (!s.up ? 0 : hasModelList(s) ? s.models.length : 1), 0)
 }
 
 // How much of a loaded model sits in GPU memory, in percent (Ollama splits big models
